@@ -1,4 +1,4 @@
-# TCKR - Stock & Crypto Ticker for Windows
+# TCKR - Stock & Crypto Ticker for Windows 
 
 **Author:** Paul R. Charovkine  
 **License:** GNU AGPLv3
