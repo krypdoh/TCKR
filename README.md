@@ -100,7 +100,7 @@ python TCKR/TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the GNU AGPLv3 License.
 
 ---
 
