@@ -69,9 +69,9 @@ You can customize TCKR at launch with these options:
 
 **Example:**
 
+```sh
 python TCKR/TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
-
-
+```
 ---
 
 ## Settings & Customization
