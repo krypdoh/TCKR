@@ -98,6 +98,8 @@ python TCKR/TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 ![TCKR Screenshot Windows 11.](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot1.png)
 
+![TCKR Screenshot Windows 11.](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot2.png)
+
 ---
 
 ## License
