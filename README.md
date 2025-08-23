@@ -36,7 +36,7 @@ Users can adjust appearance, scroll speed, transparency, and more via a settings
   - `pystray`
   - `tkinter` (standard with Python on Windows)
 
-- Font: SubwayTicker-q1Z5.ttf
+- Font: `SubwayTicker-q1Z5.ttf`
 
 Install dependencies with:
 pip install -r requirements.txt
