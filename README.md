@@ -68,15 +68,15 @@ On first launch, you will be prompted for your [Finnhub API key](https://finnhub
 
 You can customize TCKR at launch with these options:
 ```sh
---api APIKEY                  Finnhub API key 
---crypto-api APIKEY           CoinGecko API key 
---tickers, -t LIST            Comma-separated tickers (e.g. BTC,ETH,MSFT,T) 
---speed, -s INT               Ticker scroll speed 
---height, -ht INT             Ticker height in pixels 
---update-interval, -u INT     Update interval in seconds 
---crypto-first enable|disable Group crypto tickers first 
---change enable|disable       Show price change and percentage -h, 
---help                        Show help
+--api APIKEY                    Finnhub API key 
+--crypto-api APIKEY             CoinGecko API key 
+--tickers, -t LIST              Comma-separated tickers (e.g. BTC,ETH,MSFT,T) 
+--speed, -s INT                 Ticker scroll speed 
+--height, -ht INT               Ticker height in pixels 
+--update-interval, -u INT       Update interval in seconds 
+--crypto-first enable|disable   Group crypto tickers first 
+--change enable|disable         Show price change and percentage
+--help, -h                      Show help
 ```
 
 **Example:**
