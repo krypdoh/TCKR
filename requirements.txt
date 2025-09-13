@@ -1,4 +1,6 @@
-pillow
+Pillow
 requests
 screeninfo
 pystray
+sounddevice
+soundfile
