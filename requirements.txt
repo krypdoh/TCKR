@@ -4,3 +4,4 @@ screeninfo
 pystray
 sounddevice
 soundfile
+cffi
