@@ -1,7 +1,8 @@
 ﻿"""
 Author: Paul R. Charovkine
-Date: 2025.09.13
 Program: TCKR.py
+Date: 2025.09.21
+Version: 0.73.0
 
 Description:
 This program implements a customizable stock ticker application using Tkinter for Windows.
@@ -35,7 +36,8 @@ import tempfile
 import subprocess
 import sounddevice as sd
 import soundfile as sf
-
+import cffi
+import itertools
 
 def get_appdata_dir():
     appdata = os.environ.get("APPDATA")
@@ -287,28 +289,36 @@ def fetch_all_stock_prices(tickers):
         else:
             stock_tickers.append(ticker)
 
-    # Fetch stock prices in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        future_to_ticker = {
-            executor.submit(fetch_finnhub_quote, ticker, api_key): ticker
-            for ticker in stock_tickers
-        }
-        for future in concurrent.futures.as_completed(future_to_ticker):
-            ticker, result = future.result()
-            price, prev_close = result
-            if price is not None and prev_close is not None:
-                # Success: reset fail count and store last good
-                fetch_failures[ticker] = {"fail_count": 0, "last_good": (price, prev_close)}
-                prices[ticker] = (price, prev_close)
-            else:
-                # Failure: increment fail count, use last good if available
-                entry = fetch_failures.get(ticker, {"fail_count": 0, "last_good": (None, None)})
-                entry["fail_count"] += 1
-                if entry["fail_count"] <= 3 and entry["last_good"][0] is not None:
-                    prices[ticker] = entry["last_good"]
+    # Fetch stock prices in batches of 10 with 2s delay between batches
+    def batched(iterable, n):
+        it = iter(iterable)
+        while True:
+            batch = list(itertools.islice(it, n))
+            if not batch:
+                break
+            yield batch
+
+    for batch in batched(stock_tickers, 10):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            future_to_ticker = {
+                executor.submit(fetch_finnhub_quote, ticker, api_key): ticker
+                for ticker in batch
+            }
+            for future in concurrent.futures.as_completed(future_to_ticker):
+                ticker, result = future.result()
+                price, prev_close = result
+                if price is not None and prev_close is not None:
+                    fetch_failures[ticker] = {"fail_count": 0, "last_good": (price, prev_close)}
+                    prices[ticker] = (price, prev_close)
                 else:
-                    prices[ticker] = (None, None)
-                fetch_failures[ticker] = entry
+                    entry = fetch_failures.get(ticker, {"fail_count": 0, "last_good": (None, None)})
+                    entry["fail_count"] += 1
+                    if entry["fail_count"] <= 3 and entry["last_good"][0] is not None:
+                        prices[ticker] = entry["last_good"]
+                    else:
+                        prices[ticker] = (None, None)
+                    fetch_failures[ticker] = entry
+        time.sleep(2)  # 2-second delay after each batch
 
     # Fetch crypto prices from CoinGecko (with 24h change)
     if crypto_tickers:
@@ -340,11 +350,9 @@ def fetch_all_stock_prices(tickers):
                         change_pct = data[cg_id].get("usd_24h_change")
                         if price is not None and change_pct is not None:
                             prev_price = price / (1 + change_pct / 100)
-                            # Success: reset fail count and store last good
                             fetch_failures[ticker] = {"fail_count": 0, "last_good": (price, prev_price)}
                             prices[ticker] = (price, prev_price)
                         else:
-                            # Failure: increment fail count, use last good if available
                             entry = fetch_failures.get(ticker, {"fail_count": 0, "last_good": (None, None)})
                             entry["fail_count"] += 1
                             if entry["fail_count"] <= 3 and entry["last_good"][0] is not None:
@@ -353,7 +361,6 @@ def fetch_all_stock_prices(tickers):
                                 prices[ticker] = (None, None)
                             fetch_failures[ticker] = entry
                     else:
-                        # Failure: increment fail count, use last good if available
                         entry = fetch_failures.get(ticker, {"fail_count": 0, "last_good": (None, None)})
                         entry["fail_count"] += 1
                         if entry["fail_count"] <= 3 and entry["last_good"][0] is not None:
@@ -364,7 +371,6 @@ def fetch_all_stock_prices(tickers):
             except Exception as e:
                 print(f"Error fetching crypto prices: {e}")
                 for ticker in crypto_tickers:
-                    # Failure: increment fail count, use last good if available
                     entry = fetch_failures.get(ticker, {"fail_count": 0, "last_good": (None, None)})
                     entry["fail_count"] += 1
                     if entry["fail_count"] <= 3 and entry["last_good"][0] is not None:
@@ -413,14 +419,44 @@ def save_stocks(stocks):
         messagebox.showerror("Error", f"Could not save stocks: {e}")
 
 def restart_program():
-    python = sys.executable
-    os.execl(python, python, *sys.argv)
+    global tray_icon_instance
+    try:
+        if tray_icon_instance is not None:
+            tray_icon_instance.stop()
+            tray_icon_instance = None
+    except Exception:
+        pass
+    import sys
+    import subprocess
+    import os
+    if getattr(sys, 'frozen', False):
+        # Running as PyInstaller EXE
+        executable = sys.executable
+        args = sys.argv[1:]
+        subprocess.Popen([executable] + args)
+    else:
+        # Running as script: relaunch with python interpreter
+        executable = sys.executable
+        script = os.path.abspath(sys.argv[0])
+        args = sys.argv[1:]
+        subprocess.Popen([executable, script] + args)
+    os._exit(0)
 
 def fetch_prices_now_from_tray(icon=None, item=None):
+    # Always schedule on the main thread
     def fetch_and_update():
-        ticker.price_cache = fetch_all_stock_prices([ticker for ticker, _ in ticker.stocks])
-        ticker.after(0, ticker.update_prices_in_place)
-    threading.Thread(target=fetch_and_update, daemon=True).start()
+        try:
+            ticker.price_cache = fetch_all_stock_prices([ticker for ticker, _ in ticker.stocks])
+            ticker.after(0, ticker.update_prices_in_place)
+        except Exception as e:
+            print("Error in fetch_prices_now_from_tray:", e)
+            import traceback
+            traceback.print_exc()
+    # Use root.after to ensure this runs in the main thread
+    try:
+        root.after(0, fetch_and_update)
+    except Exception as e:
+        print("Error scheduling fetch_and_update:", e)
 
 ABM_NEW = 0x00000000
 ABM_REMOVE = 0x00000001
@@ -524,6 +560,7 @@ class ScrollingTicker(tk.Canvas):
         self._led_bg_cache_size = (0, 0)
         self._glass_overlay_cache = None
         self._glass_overlay_cache_size = (0, 0)
+        self._glow_text_cache = {}  # Cache for glow text images
 
     def _on_configure(self, event=None):
         # Throttle expensive redraws to at most every 100ms
@@ -595,6 +632,10 @@ class ScrollingTicker(tk.Canvas):
         self.tag_lower("led_bg")
 
     def create_glow_text_image(self, text, font_tuple, glow_color, blur_radius=8, offset=(0,0)):
+        cache_key = (text, font_tuple, glow_color, blur_radius)
+        if cache_key in self._glow_text_cache:
+            return self._glow_text_cache[cache_key]
+
         font_name, font_size = font_tuple[0], font_tuple[1]
         try:
             font = ImageFont.truetype(font_name, font_size)
@@ -608,7 +649,9 @@ class ScrollingTicker(tk.Canvas):
         draw = ImageDraw.Draw(img)
         draw.text((12+offset[0],12+offset[1]), text, font=font, fill=glow_color)
         blurred = img.filter(ImageFilter.GaussianBlur(blur_radius))
-        return ImageTk.PhotoImage(blurred), (w, h)
+        imgtk = ImageTk.PhotoImage(blurred)
+        self._glow_text_cache[cache_key] = (imgtk, (w, h))
+        return imgtk, (w, h)
 
     def load_data_async(self):
         start_time = time.time()
@@ -639,15 +682,23 @@ class ScrollingTicker(tk.Canvas):
             self.delete("all")
             self.items.clear()
             self.images = []
-            y_center = self.ticker_height // 2
+            canvas_height = self.winfo_height()
+            vertical_offset = (canvas_height - self.ticker_height) // 2
+            y_center = (self.ticker_height // 2) + vertical_offset
             canvas_width = self.winfo_width()
             print("canvas_width:", canvas_width)  # DEBUG
             if canvas_width <= 1:
                 canvas_width = get_primary_monitor_width()
             if self.loading:
+                font = tkFont.Font(family=self.ticker_font[0], size=self.ticker_font[1], weight="bold")
+                text = "TCKR: LOADING"
+                # Get the text's pixel height
+                text_height = font.metrics("ascent") + font.metrics("descent")
+                # Center the baseline of the text in the canvas
+                loading_y_center = (canvas_height - text_height) // 2 + font.metrics("ascent")
                 self.create_text(
-                    canvas_width // 2, y_center,
-                    text="TCKR: LOADING", fill="#FFD700", font=self.ticker_font, anchor="c"
+                    canvas_width // 2, loading_y_center,
+                    text=text, fill="#FFD700", font=self.ticker_font, anchor="n"
                 )
                 self.ticker_length = canvas_width
                 self.cycle_items = []
@@ -891,7 +942,6 @@ class ScrollingTicker(tk.Canvas):
     def scroll(self):
         try:
             if self.loading or not self.cycle_items or self._pause_on_hover:
-                # Do not reschedule scroll if paused
                 return
 
             now = time.perf_counter()
@@ -902,10 +952,10 @@ class ScrollingTicker(tk.Canvas):
 
             pixels_per_sec = max(1, float(self.speed)) * 60
             self._scroll_accum += pixels_per_sec * elapsed
-            move_pixels = int(self._scroll_accum)
-            self._scroll_accum -= move_pixels
+            move_pixels = self._scroll_accum
+            self._scroll_accum = 0.0
 
-            if move_pixels > 0:
+            if abs(move_pixels) > 0.01:
                 for cycle in self.cycle_items:
                     for item_id in cycle["ids"]:
                         self.move(item_id, -move_pixels, 0)
@@ -1064,12 +1114,15 @@ class ScrollingTicker(tk.Canvas):
             # Only flash if any price changed
             if price_changed:
                 self.flashing = True
-                sequential_flash_delay = 120  # ms between flashes
+                sequential_flash_delay = 60  # ms between flashes
 
                 def flash_next(index=0):
                     if index < len(flash_items):
                         item_id, final_color = flash_items[index]
-                        self.flash_item(item_id, final_color, flash_color="#FFD700", duration=500)
+                        self.flash_item(item_id, final_color, flash_color="#FFD700", duration=150)  # was 500   
+
+
+
                         self.after(sequential_flash_delay, lambda: flash_next(index + 1))
                     else:
                         self.flashing = False  # Done flashing, allow next sequence
@@ -1234,6 +1287,9 @@ def show_manage_stocks_dialog():
         return
 
     stocks = load_stocks()
+    # Sort stocks alphabetically by ticker symbol
+    stocks.sort(key=lambda s: s[0])
+
     dialog = tk.Toplevel(root)
     manage_stocks_dialog_instance = dialog  # Track the instance
     dialog.title("Manage Stocks")
@@ -1624,6 +1680,7 @@ def show_about_dialog():
     dialog.focus_force()
     dialog.attributes("-topmost", True)
     dialog.resizable(False, False)
+    dialog.update_idletasks()
     icon_path = resource_path("TCKR.ico")
     if os.path.exists(icon_path):
         try:
@@ -1641,8 +1698,8 @@ def show_about_dialog():
     # Insert lines and tag links
     link_map = {
         "https://github.com/krypdoh/TCKR": lambda e: webbrowser.open("https://github.com/krypdoh/TCKR"),
-        "https://finnhub.io": lambda e: webbrowser.open("https://finnhub.io"),
-        "https://coingecko.com": lambda e: webbrowser.open("https://coingecko.com"),
+        "https://finnhub.io" : lambda e: webbrowser.open("https://finnhub.io"),
+        "https://coingecko.com" : lambda e: webbrowser.open("https://coingecko.com"),
     }
     for idx, line in enumerate(about_lines):
         if "https://github.com/krypdoh/TCKR" in line:
@@ -1830,6 +1887,7 @@ if __name__ == "__main__":
             exit(0)
         settings = get_settings()
     initial_height = settings.get("height", 60)
+    window_height = int(initial_height * 0.90)  # 10% smaller background
     initial_speed = settings.get("speed", 1.0)
     initial_update_interval = settings.get("update_interval", 300000)
 
@@ -1879,16 +1937,17 @@ if __name__ == "__main__":
     if screen_index < 0 or screen_index >= len(monitors):
         screen_index = 0
     m = monitors[screen_index]
-    root.geometry(f"{m.width}x{initial_height}+{m.x}+{m.y}")
-    set_appbar(int(root.winfo_id()), height=initial_height, x=m.x, y=m.y, width=m.width)
+    root.geometry(f"{m.width}x{window_height}+{m.x}+{m.y}")
+    set_appbar(int(root.winfo_id()), height=window_height, x=m.x, y=m.y, width=m.width)
     root.focus_force()
 
     def change_height(delta):
         new_height = max(50, min(200, ticker.ticker_height + delta))
         set_settings(height=new_height)
         screen_width = get_primary_monitor_width()
-        root.geometry(f"{screen_width}x{new_height}+0+0")
-        set_appbar(int(root.winfo_id()), height=new_height, width=screen_width)
+        window_height = int(new_height * 0.90)
+        root.geometry(f"{screen_width}x{window_height}+0+0")
+        set_appbar(int(root.winfo_id()), height=window_height, width=screen_width)
         ticker.set_height(new_height)
 
     root.bind("<Up>", lambda e: change_height(10))
