@@ -7,11 +7,12 @@
 
 ## Description
 
-TCKR is a customizable, always-on-top ticker application for Windows that displays real-time stock and cryptocurrency prices.  
-It features a modern, glassy UI with LED effects, multi-monitor support, and a system tray icon for quick access.  
-The ticker fetches stock prices from Finnhub and crypto prices from CoinGecko, supports user configuration, and allows management of displayed tickers.  
-Users can adjust appearance, scroll speed, transparency, and more via a settings dialog or command-line arguments.
+TCKR is a customizable, always-on-top ticker application for Windows that displays real-time* stock prices.  
+It features a modern UI with LED effects, multi-monitor support, and a system tray icon for quick access.  
+The ticker fetches stock prices from Finnhub, supports user configuration, and allows management of displayed tickers.  
+Users can adjust appearance, scroll speed, transparency, display screen, and more via a settings dialog or command-line arguments.
 
+* Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
 ---
 
 ## Key Features
