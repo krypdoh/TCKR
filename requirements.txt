@@ -1,7 +1,2 @@
-Pillow
 requests
-screeninfo
-pystray
-sounddevice
-soundfile
-cffi
+PyQt5
