@@ -1,8 +1,8 @@
 ﻿"""
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.09.24
-Version: 0.99
+Date: 2025.09.26
+Version: 0.99.1
 License: GNU AGPLv3
 
 Description:
@@ -1087,6 +1087,8 @@ def main():
     apply_command_line_settings(args)
 
     app = QtWidgets.QApplication(sys.argv)
+    icon_path = resource_path("TCKR.ico")
+    app.setWindowIcon(QtGui.QIcon(icon_path)) # <-- Add this line
     app.setQuitOnLastWindowClosed(False)
     ticker_window = TickerWindow()
     ticker_window.set_transparency(get_settings().get("transparency", 100))
