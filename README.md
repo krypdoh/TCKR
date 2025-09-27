@@ -12,7 +12,7 @@ It features a modern UI with LED effects, multi-monitor support, and a system tr
 The ticker fetches stock prices from Finnhub, supports user configuration, and allows management of displayed tickers.  
 Users can adjust appearance, scroll speed, transparency, display screen, and more via a settings dialog or command-line arguments.
 
-* Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
+** Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
 ---
 
 ## Key Features
