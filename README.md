@@ -30,13 +30,10 @@ Users can adjust appearance, scroll speed, transparency, and more via a settings
 
 - Python 3.8+
 - Modules:
-  - `pillow`
   - `requests`
-  - `screeninfo`
-  - `pystray`
-  - `tkinter` (standard with Python on Windows)
+  - `PyQt5`
 
-- Font: `SubwayTicker-q1Z5.ttf`
+- Font: `SubwayTicker.ttf`
 
 Install dependencies with:
 pip install -r requirements.txt
@@ -60,7 +57,6 @@ pip install -r requirements.txt
     ```
 
 On first launch, you will be prompted for your [Finnhub API key](https://finnhub.io/).  
-(Optional: Enter a CoinGecko API key for crypto support via Settings or CLI if needed otherwise use the built-in key)
 
 ---
 
@@ -68,21 +64,18 @@ On first launch, you will be prompted for your [Finnhub API key](https://finnhub
 
 You can customize TCKR at launch with these options:
 ```sh
---api APIKEY                    Finnhub API key 
---crypto-api APIKEY             CoinGecko API key 
+--api, -a APIKEY                Finnhub API key 
 --tickers, -t LIST              Comma-separated tickers (e.g. BTC,ETH,MSFT,T) 
 --speed, -s INT                 Ticker scroll speed 
 --height, -ht INT               Ticker height in pixels 
 --update-interval, -u INT       Update interval in seconds 
---crypto-first enable|disable   Group crypto tickers first 
---change enable|disable         Show price change and percentage
 --help, -h                      Show help
 ```
 
 **Example:**
 
 ```sh
-python TCKR/TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
+TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 ```
 ---
 
@@ -90,7 +83,7 @@ python TCKR/TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 - Right-click the ticker to open the settings dialog.
 - Manage tickers, adjust appearance, move to another screen, and more.
-- Settings and ticker lists are saved in your user AppData folder.
+- Settings and ticker lists are saved in your user %AppData%/TCKR folder.
 
 ---
 
