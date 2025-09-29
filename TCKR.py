@@ -1,8 +1,8 @@
 ﻿"""
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.09.26
-Version: 0.99.1
+Date: 2025.09.29
+Version: 0.99.2
 License: GNU AGPLv3
 
 Description:
@@ -30,6 +30,49 @@ import shutil
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "TCKR")
 SETTINGS_FILE = os.path.join(APPDATA_DIR, "TCKR.Settings.json")
 STOCKS_FILE = os.path.join(APPDATA_DIR, "TCKR.Tickers.json")
+
+ABM_NEW = 0x00000000
+ABM_REMOVE = 0x00000001
+ABM_QUERYPOS = 0x00000002
+ABM_SETPOS = 0x00000003
+ABE_TOP = 1
+
+class APPBARDATA(ctypes.Structure):
+    _fields_ = [
+        ('cbSize', wintypes.DWORD),
+        ('hWnd', wintypes.HWND),
+        ('uCallbackMessage', wintypes.UINT),
+        ('uEdge', wintypes.UINT),
+        ('rc', wintypes.RECT),
+        ('lParam', wintypes.LPARAM),
+    ]
+
+def set_appbar(hwnd, height, rect):
+    shell32 = ctypes.windll.shell32
+    user32 = ctypes.windll.user32
+
+    msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
+    abd = APPBARDATA()
+    abd.cbSize = ctypes.sizeof(APPBARDATA)
+    abd.hWnd = hwnd
+    abd.uCallbackMessage = msg_id
+    abd.uEdge = ABE_TOP
+    abd.rc.left = rect.left()
+    abd.rc.top = rect.top()
+    abd.rc.right = rect.left() + rect.width()
+    abd.rc.bottom = rect.top() + height
+
+    shell32.SHAppBarMessage(ABM_NEW, ctypes.byref(abd))
+    shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
+    abd.rc.bottom = abd.rc.top + height
+    shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
+
+def remove_appbar(hwnd):
+    shell32 = ctypes.windll.shell32
+    abd = APPBARDATA()
+    abd.cbSize = ctypes.sizeof(APPBARDATA)
+    abd.hWnd = hwnd
+    shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
 
 def get_settings():
     if os.path.exists(SETTINGS_FILE):
@@ -231,13 +274,21 @@ def get_ticker_icon(ticker, size=32):
     if pixmap is None or pixmap.isNull():
         pixmap = QtGui.QPixmap(size, size)
         pixmap.fill(QtCore.Qt.transparent)
+
+    # Subtle pixelation effect
+    pixel_size = max(8, size // 2)
+    small_pixmap = pixmap.scaled(pixel_size, pixel_size, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
+    pixmap = small_pixmap.scaled(size, size, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
+
+    # Enhanced scanline effect (thicker lines, no border/rounded corners)
     scanline_pixmap = QtGui.QPixmap(pixmap.size())
     scanline_pixmap.fill(QtCore.Qt.transparent)
     painter = QtGui.QPainter(scanline_pixmap)
+    painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
     painter.drawPixmap(0, 0, pixmap)
-    scanline_color = QtGui.QColor(0, 0, 0, 40)
-    for y in range(0, pixmap.height(), 2):
-        painter.fillRect(0, y, pixmap.width(), 1, scanline_color)
+    scanline_color = QtGui.QColor(0, 0, 0, 48)  # Subtle opacity
+    for y in range(0, pixmap.height(), 3):      # Every 3 pixels, 2px thick
+        painter.fillRect(0, y, pixmap.width(), 2, scanline_color)
     painter.end()
     return scanline_pixmap
 
@@ -451,33 +502,19 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             self.ticker_window.activateWindow()
 
 def set_appbar(hwnd, height, rect):
-    ABM_NEW = 0x00000000
-    ABM_REMOVE = 0x00000001
-    ABM_QUERYPOS = 0x00000002
-    ABM_SETPOS = 0x00000003
-    ABE_TOP = 1
-
-    class APPBARDATA(ctypes.Structure):
-        _fields_ = [
-            ('cbSize', wintypes.DWORD),
-            ('hWnd', wintypes.HWND),
-            ('uCallbackMessage', wintypes.UINT),
-            ('uEdge', wintypes.UINT),
-            ('rc', wintypes.RECT),
-            ('lParam', wintypes.LPARAM),
-        ]
-
     shell32 = ctypes.windll.shell32
+    user32 = ctypes.windll.user32
 
+    msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
     abd.hWnd = hwnd
-    abd.uCallbackMessage = 0
+    abd.uCallbackMessage = msg_id
     abd.uEdge = ABE_TOP
-    abd.rc.left = rect.x()
-    abd.rc.top = rect.y()
-    abd.rc.right = rect.x() + rect.width()
-    abd.rc.bottom = rect.y() + height
+    abd.rc.left = rect.left()
+    abd.rc.top = rect.top()
+    abd.rc.right = rect.left() + rect.width()
+    abd.rc.bottom = rect.top() + height
 
     shell32.SHAppBarMessage(ABM_NEW, ctypes.byref(abd))
     shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
@@ -485,17 +522,6 @@ def set_appbar(hwnd, height, rect):
     shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
 
 def remove_appbar(hwnd):
-    ABM_REMOVE = 0x00000001
-
-    class APPBARDATA(ctypes.Structure):
-        _fields_ = [
-            ('cbSize', wintypes.DWORD),
-            ('hWnd', wintypes.HWND),
-            ('uCallbackMessage', wintypes.UINT),
-            ('uEdge', wintypes.UINT),
-            ('rc', wintypes.RECT),
-            ('lParam', wintypes.LPARAM),
-        ]
     shell32 = ctypes.windll.shell32
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
@@ -509,7 +535,9 @@ class TickerWindow(QtWidgets.QWidget):
         self.setContentsMargins(0, 0, 0, 0)
         self.ticker_height = get_settings().get("ticker_height", 60)
         self.setWindowFlags(
+            QtCore.Qt.Window |
             QtCore.Qt.FramelessWindowHint
+            # REMOVE QtCore.Qt.WindowStaysOnTopHint
         )
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
         self.setFixedHeight(self.ticker_height)
@@ -542,6 +570,7 @@ class TickerWindow(QtWidgets.QWidget):
         self.set_sound_file()
         self.show()
         if sys.platform == "win32":
+            # Ensure AppBar is set after window is shown
             QtCore.QTimer.singleShot(0, self.setup_appbar_and_position)
         QtCore.QTimer.singleShot(0, self.update_prices_full)
         self.failed_fetch_counts = {}
@@ -569,7 +598,7 @@ class TickerWindow(QtWidgets.QWidget):
         def after_removal():
             def after_wait():
                 set_appbar(int(self.winId()), self.ticker_height, rect)
-                self.move(rect.x(), rect.y())
+                self.move(0, 0)
                 self.resize(rect.width(), self.ticker_height)
                 self.show()
             QtCore.QTimer.singleShot(200, after_wait)
@@ -602,10 +631,11 @@ class TickerWindow(QtWidgets.QWidget):
         else:
             screen = app.primaryScreen()
         rect = screen.geometry()
-        self.move(rect.x(), rect.y())
+        self.move(rect.left(), rect.top())
         self.resize(rect.width(), self.ticker_height)
     def update_font_and_label(self, width=None):
-        font_size = max(8, int(self.ticker_height * 32 / 60))
+        # Use 70% of ticker height for font, leaving padding above and below
+        font_size = max(8, int(self.ticker_height * 0.7))
         font_path = resource_path("SubwayTicker.ttf")
         if os.path.exists(font_path):
             font_id = QtGui.QFontDatabase.addApplicationFont(font_path)
@@ -740,7 +770,7 @@ class TickerWindow(QtWidgets.QWidget):
         self.ticker_pixmap_widths = []
         self.ticker_area_templates = []
         metrics = QtGui.QFontMetrics(self.ticker_font)
-        icon_size = int(self.ticker_height * 0.85)
+        icon_size = int(self.ticker_height * 0.85)  # Icon a little larger than font size, leaves 15% padding
         small_font = QtGui.QFont(self.ticker_font)
         small_font.setPointSize(max(8, int(self.ticker_font.pointSize() * 0.5)))
         small_metrics = QtGui.QFontMetrics(small_font)
@@ -759,7 +789,7 @@ class TickerWindow(QtWidgets.QWidget):
                     change_text = f"+{abs(change):.2f}▲"
                     pct_text = f"+{abs(pct):.2f}%"
                 elif change < 0:
-                    change_text = f"-{abs(pct):.2f}▼"
+                    change_text = f"-{abs(change):.2f}▼"
                     pct_text = f"-{abs(pct):.2f}%"
             change_width = max(small_metrics.horizontalAdvance(change_text), small_metrics.horizontalAdvance(pct_text)) if (change_text or pct_text) else 0
             sep = "      "
@@ -769,22 +799,25 @@ class TickerWindow(QtWidgets.QWidget):
             pixmap.fill(QtCore.Qt.transparent)
             painter = QtGui.QPainter(pixmap)
             x = 0
-            painter.drawPixmap(x, (self.ticker_height - icon_size) // 2, icon)
+            # Center icon vertically
+            icon_y = (self.ticker_height - icon_size) // 2
+            painter.drawPixmap(x, icon_y, icon)
             x += icon_size + 8
-            tkr_y = self.ticker_height // 2 + metrics.ascent() // 2
+            # Center text vertically
+            tkr_y = (self.ticker_height + metrics.ascent() - metrics.descent()) // 2
             symbol_rect = QtCore.QRect(x, 0, tkr_width, self.ticker_height)
             painter.setPen(QtGui.QColor("#00B3FF"))
             painter.setFont(self.ticker_font)
             painter.drawText(x, tkr_y, tkr)
             x += tkr_width
-            price_y = self.ticker_height // 2 + metrics.ascent() // 2
+            price_y = tkr_y
             if price is not None and prev is not None:
                 if price > prev:
                     price_color = QtGui.QColor("#00FF40")
                 elif price < prev:
                     price_color = QtGui.QColor("#FF4040")
                 else:
-                    price_color = QtGui.QColor("#FFD700")
+                    price_color = QtGui.QColor("#FFFFFF")  # White for unchanged price
             else:
                 price_color = QtGui.QColor("#FFD700")
             price_rect = QtCore.QRect(x, 0, price_width, self.ticker_height)
@@ -795,7 +828,7 @@ class TickerWindow(QtWidgets.QWidget):
             if change_text or pct_text:
                 painter.setFont(small_font)
                 stacked_height = small_metrics.height() * 2 + 2
-                stacked_top = self.ticker_height // 2 - stacked_height // 2 + small_metrics.ascent()
+                stacked_top = (self.ticker_height - stacked_height) // 2 + small_metrics.ascent()
                 color = QtGui.QColor("#00FF40") if change_text.startswith("+") else QtGui.QColor("#FF4040") if change_text.startswith("-") else QtGui.QColor("#00B3FF")
                 painter.setPen(color)
                 painter.drawText(x + 10, stacked_top, change_text)
@@ -804,7 +837,7 @@ class TickerWindow(QtWidgets.QWidget):
                 x += 10 + change_width
             painter.setPen(QtGui.QColor("#00B3FF"))
             painter.setFont(self.ticker_font)
-            painter.drawText(x, self.ticker_height // 2 + metrics.ascent() // 2, sep)
+            painter.drawText(x, tkr_y, sep)
             painter.end()
             self.ticker_pixmaps.append(pixmap)
             self.ticker_pixmap_widths.append(total_width)
@@ -936,6 +969,31 @@ class TickerWindow(QtWidgets.QWidget):
         if not self.timer.isActive():
             self.timer.start(self.timer_interval)
         event.accept()
+    def nativeEvent(self, eventType, message):
+        # Only process Windows messages
+        if eventType != "windows_generic_MSG":
+            return False, 0
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
+        msg_ptr = int(message)
+        class MSG(ctypes.Structure):
+            _fields_ = [
+                ("hwnd", wintypes.HWND),
+                ("message", wintypes.UINT),
+                ("wParam", wintypes.WPARAM),
+                ("lParam", wintypes.LPARAM),
+                ("time", wintypes.DWORD),
+                ("pt_x", wintypes.LONG),
+                ("pt_y", wintypes.LONG),
+            ]
+        msg = MSG.from_address(msg_ptr)
+        if msg.message == msg_id:
+            # AppBar callback received
+            # Optionally handle ABN_POSCHANGED, ABN_FULLSCREENAPP, etc.
+            return True, 0
+        return False, 0
 
 class ManageStocksDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
