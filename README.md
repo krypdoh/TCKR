@@ -7,10 +7,10 @@
 
 ## Description
 
-TCKR is a customizable, always-on-top ticker application for Windows that displays real-time* stock prices.  
-It features a modern UI with LED effects, multi-monitor support, and a system tray icon for quick access.  
+TCKR is a customizable, always-on-top ticker application for Windows that displays real-time* stock prices with visual alerts for significant price movements.  
+It features a modern LED-style UI with glow effects for stocks with ≥5% changes, multi-monitor support, and a system tray icon for quick access.  
 The ticker fetches stock prices from Finnhub, supports user configuration, and allows management of displayed tickers.  
-Users can adjust appearance, scroll speed, transparency, display screen, and more via a settings dialog or command-line arguments.
+Users can adjust appearance, scroll speed, transparency, display screen, update intervals, and more via a settings dialog or command-line arguments.
 
 ** Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
 ---
@@ -18,12 +18,14 @@ Users can adjust appearance, scroll speed, transparency, display screen, and mor
 ## Key Features
 
 - Real-time stock and crypto price display (Finnhub & CoinGecko APIs)
+- **Visual alerts**: Glowing effect for stocks with ≥5% price changes (lasts 5 minutes)
 - Customizable appearance: height, transparency, glass effect, scroll speed
 - Multi-monitor and system tray support
 - Manage tickers (add, remove, edit) via GUI
 - Command-line options for automation and scripting
 - Clickable tickers open Yahoo Finance; donation link included
 - Persistent settings and ticker list stored in user AppData
+- Windows AppBar integration for proper screen space reservation
 
 ---
 
@@ -83,9 +85,14 @@ TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 ## Settings & Customization
 
-- Right-click the ticker to open the settings dialog.
-- Manage tickers, adjust appearance, move to another screen, and more.
-- Settings and ticker lists are saved in your user %AppData%/TCKR folder.
+- Right-click the ticker or use the system tray icon to access settings
+- **Manage tickers**: Add or remove stocks/crypto symbols
+- **Visual customization**: Adjust ticker height, transparency, scroll speed
+- **Display options**: Choose which monitor to display on (multi-monitor support)
+- **Update interval**: Configure how often prices are refreshed (default: 5 minutes)
+- **Network settings**: Configure proxy and SSL certificate options if needed
+- **Glow alerts**: Automatic visual highlighting for stocks with ≥5% price changes (5-minute duration)
+- Settings and ticker lists are automatically saved in your user %AppData%/TCKR folder
 
 ---
 
