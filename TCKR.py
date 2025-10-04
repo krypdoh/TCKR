@@ -1,4 +1,4 @@
-﻿"""
+"""
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.10.02
@@ -920,7 +920,7 @@ class TickerWindow(QtWidgets.QWidget):
         self.offset = 0
         self.scroll_speed = max(1, get_settings().get("speed", 1))
         self.update_interval = get_settings().get("update_interval", 300) * 1000  # seconds to ms
-        self.timer_interval = 16
+        self.timer_interval = 16  # Back to 16ms (60 FPS) now that stuttering is fixed
         self.ticker_pixmaps = []
         self.ticker_pixmap_widths = []
         self.gl_widget = TickerGLWidget(self)
@@ -979,9 +979,10 @@ class TickerWindow(QtWidgets.QWidget):
             
             # Set up periodic position check to ensure we stay at top
             # Increased from 5s to 60s to minimize scroll stuttering from Windows API calls
-            self.position_check_timer = QtCore.QTimer(self)
-            self.position_check_timer.timeout.connect(self.check_and_fix_position)
-            self.position_check_timer.start(60000)  # Check every 60 seconds (reduced frequency to minimize stuttering)
+            # Temporarily disabled to test if it's causing stuttering
+            # self.position_check_timer = QtCore.QTimer(self)
+            # self.position_check_timer.timeout.connect(self.check_and_fix_position)
+            # self.position_check_timer.start(60000)  # Check every 60 seconds (reduced frequency to minimize stuttering)
         else:
             # On non-Windows platforms, show immediately
             self.show()
@@ -1464,20 +1465,20 @@ class TickerWindow(QtWidgets.QWidget):
                                   tkr in self.recently_expired_effects)
                 
                 # Debug output for glow decision
-                if change_percent >= 5.0:
-                    print(f"[GLOW CHECK] {tkr}: change={change_percent:.2f}%, in_pulse={tkr in self.pulse_effects}, already_glowed={already_glowed_for_this}, recently_expired={recently_expired}")
+                # if change_percent >= 5.0:
+                #     print(f"[GLOW CHECK] {tkr}: change={change_percent:.2f}%, in_pulse={tkr in self.pulse_effects}, already_glowed={already_glowed_for_this}, recently_expired={recently_expired}")
                 
                 if change_percent >= 5.0 and tkr not in self.pulse_effects and not already_glowed_for_this and not recently_expired:
-                    print(f"[GLOW] Found significant change for {tkr}: {change_percent:.2f}%")
+                    # print(f"[GLOW] Found significant change for {tkr}: {change_percent:.2f}%")
                     self.pulse_effects[tkr] = time.time()
                     self.glow_baseline_prices[tkr] = price  # Set baseline for initial glow
                     self.glow_history[tkr] = prev_close  # Remember this prev_close
         
         self.build_ticker_pixmaps()
         self.gl_widget.update()
-        print(f"[PRICE UPDATE] {self.prices}")
+        # print(f"[PRICE UPDATE] {self.prices}")
         if price_changed:
-            print(f"[PRICE CHANGE DETECTED]")
+            # print(f"[PRICE CHANGE DETECTED]")
             self.play_update_sound()
     def set_transparency(self, percent):
         self.setWindowOpacity(percent / 100.0)
@@ -1518,7 +1519,7 @@ class TickerWindow(QtWidgets.QWidget):
                     if (change_percent >= 5.0 and 
                         tkr not in self.pulse_effects and 
                         not recently_expired):
-                        print(f"[GLOW] Triggering glow for {tkr} with {change_percent:.2f}% change")
+                        # print(f"[GLOW] Triggering glow for {tkr} with {change_percent:.2f}% change")
                         self.pulse_effects[tkr] = current_time
         
         for tkr in self.stocks:
@@ -1540,6 +1541,9 @@ class TickerWindow(QtWidgets.QWidget):
         self.ticker_pixmaps = []
         self.ticker_pixmap_widths = []
         self.ticker_area_templates = []
+        
+        # Don't clear ghost_frames here - we're making deep copies so they remain valid
+        
         metrics = QtGui.QFontMetrics(self.ticker_font)
         icon_size = int(self.ticker_height * 0.85)  # Icon a little larger than font size, leaves 15% padding
         small_font = QtGui.QFont(self.ticker_font)
@@ -1776,17 +1780,27 @@ class TickerWindow(QtWidgets.QWidget):
             
             # Different bloom colors and intensity for different content
             if area_type == 'price':
-                # Brighter bloom for prices (the main content)
-                gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 35))
-                gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 15))
+                # Subtle bloom matching the price text color
+                price, prev = self.prices.get(tkr, (None, None))
+                if price is not None and prev is not None:
+                    if price > prev:
+                        bloom_color = QtGui.QColor(0, 255, 64)  # Green
+                    elif price < prev:
+                        bloom_color = QtGui.QColor(255, 64, 64)  # Red
+                    else:
+                        bloom_color = QtGui.QColor(255, 255, 255)  # White
+                else:
+                    bloom_color = QtGui.QColor(255, 215, 0)  # Gold for N/A
+                gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 30))
+                gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 12))
             elif area_type == 'symbol':
-                # Very subtle bloom for symbols (text is clear)
-                gradient.setColorAt(0, QtGui.QColor(200, 220, 255, 20))
-                gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 8))
+                
+                gradient.setColorAt(0, QtGui.QColor(0, 179, 255, 30))
+                gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, 12))
             else:
                 # Minimal bloom for other elements like icons (don't obscure them)
                 gradient.setColorAt(0, QtGui.QColor(200, 220, 255, 12))
-                gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 4))
+                gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 5))
             
             gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
             
@@ -1824,47 +1838,49 @@ class TickerWindow(QtWidgets.QWidget):
 
     def apply_ghosting_effect(self, painter, width, height):
         """
-        Apply motion blur/ghosting effect (refresh rate artifacts).
+        Apply motion blur/ghosting effect by drawing current content at offset positions.
         Simulates LED persistence and creates trailing effect on moving content.
         """
         # Check if ghosting effect is enabled
         if not get_settings().get("led_ghosting_effect", True):
             return
         
-        # Store previous frame's pixmaps and positions for ghosting
-        if not hasattr(self, 'ghost_frames'):
-            self.ghost_frames = []
+        # Draw ghost trails by rendering current content at offset positions
+        painter.setOpacity(0.6)  # 60% opacity for more visible ghost trail
         
-        # Draw the previous frame FIRST (before saving current)
-        if len(self.ghost_frames) >= 1 and len(self.ghost_frames[-1]['pixmaps']) > 0:
-            # Use the most recent previous frame (just one frame back)
-            painter.setOpacity(0.4)  # 40% opacity for subtle but visible trail
-            
-            old_frame = self.ghost_frames[-1]  # Last stored frame
-            draw_x = old_frame['offset']
-            
-            for pixmap, w in zip(old_frame['pixmaps'], old_frame['widths']):
-                if draw_x + w > 0 and draw_x < width:
-                    painter.drawPixmap(draw_x, 0, pixmap)
-                draw_x += w
-            
-            if hasattr(self, '_donate_pixmap') and self._donate_pixmap:
-                painter.drawPixmap(draw_x, 0, self._donate_pixmap)
-            
-            # Reset opacity
-            painter.setOpacity(1.0)
+        base_cycle_width = self.get_cycle_width()
+        donate_cycle_width = self._donate_pixmap_width + base_cycle_width
+
+        cycle_positions = []
+        # Use scroll speed to determine ghost offset (faster scrolling = more offset)
+        ghost_offset = max(2, int(self.scroll_speed * 1.5))  # Minimum 2px, gentle scaling with speed
+        x = self.offset + ghost_offset
+        est_cycles = (width // min(base_cycle_width, donate_cycle_width)) + 6
+        for i in range(est_cycles):
+            if i % 3 == 0:
+                cycle_positions.append((x, True))
+                x += donate_cycle_width
+            else:
+                cycle_positions.append((x, False))
+                x += base_cycle_width
+
+        # Draw ghost content using same logic as main drawing
+        for x_pos, is_donate in cycle_positions:
+            draw_x = x_pos
+            # Draw stock tickers first (same as main drawing)
+            if hasattr(self, 'ticker_pixmaps') and hasattr(self, 'ticker_pixmap_widths'):
+                for pixmap, w in zip(self.ticker_pixmaps, self.ticker_pixmap_widths):
+                    if pixmap and not pixmap.isNull() and draw_x + w > 0 and draw_x < width:
+                        painter.drawPixmap(draw_x, 0, pixmap)
+                    draw_x += w
+            # Then draw donate message at the end (if this cycle includes it)
+            if is_donate and hasattr(self, '_donate_pixmap') and self._donate_pixmap and not self._donate_pixmap.isNull():
+                if draw_x + self._donate_pixmap.width() > 0 and draw_x < width:
+                    painter.drawPixmap(draw_x, 0, self._donate_pixmap)
         
-        # Save current frame data (will be used as ghost in next frame)
-        current_frame = {
-            'offset': self.offset,
-            'pixmaps': self.ticker_pixmaps.copy() if hasattr(self, 'ticker_pixmaps') else [],
-            'widths': self.ticker_pixmap_widths.copy() if hasattr(self, 'ticker_pixmap_widths') else []
-        }
-        self.ghost_frames.append(current_frame)
-        
-        # Keep only the last frame (most recent previous frame)
-        if len(self.ghost_frames) > 2:
-            self.ghost_frames.pop(0)
+        # Reset opacity
+        painter.setOpacity(1.0)
+
 
     def apply_glass_glare_effect(self, painter, width, height):
         """
@@ -1974,27 +1990,11 @@ class TickerWindow(QtWidgets.QWidget):
             y = (height + metrics.ascent()) // 2
             painter.setPen(QtGui.QColor("#FFD700"))
             painter.drawText(x, y, text)
-            
-            # Apply visual effects even during loading
-            settings = get_settings()
-            
-            # Apply bloom effect to loading text
-            if settings.get("led_bloom_effect", False):
-                text_rect = QtCore.QRect(x, y - metrics.ascent(), text_width, metrics.height())
-                self.apply_bloom_to_rect(painter, text_rect, width, height)
-            
-            # Apply glass glare effect
-            if settings.get("led_glass_glare", False):
-                self.apply_glass_glare_effect(painter, width, height)
-            
             painter.end()
             return
         if not self.ticker_pixmaps:
             painter.end()
             return
-
-        # Apply ghosting effect early (creates trails behind moving content)
-        self.apply_ghosting_effect(painter, width, height)
 
         base_cycle_width = self.get_cycle_width()
         donate_cycle_width = self._donate_pixmap_width + base_cycle_width
@@ -2040,6 +2040,9 @@ class TickerWindow(QtWidgets.QWidget):
         # Apply bloom/glow effect (light bleeding from bright LEDs)
         self.apply_bloom_effect(painter, width, height)
         
+        # Apply ghosting effect on top of everything (creates glow effect)
+        self.apply_ghosting_effect(painter, width, height)
+        
         # Apply glass cover with reflections/glare (final layer on top of everything)
         self.apply_glass_glare_effect(painter, width, height)
         
@@ -2060,12 +2063,21 @@ class TickerWindow(QtWidgets.QWidget):
         if tray:
             tray.contextMenu().exec_(event.globalPos())
     def closeEvent(self, event):
+        # Stop all timers immediately to prevent further processing
+        if hasattr(self, 'timer') and self.timer.isActive():
+            self.timer.stop()
         if hasattr(self, 'update_timer') and self.update_timer.isActive():
             self.update_timer.stop()
         if hasattr(self, 'position_check_timer') and self.position_check_timer.isActive():
             self.position_check_timer.stop()
+        
+        # Clear any pending API fetch tasks in the thread pool
+        QtCore.QThreadPool.globalInstance().clear()
+        
+        # Remove appbar quickly
         if sys.platform == "win32":
             remove_appbar(int(self.winId()))
+        
         super().closeEvent(event)
     def enterEvent(self, event):
         if self.timer.isActive():
