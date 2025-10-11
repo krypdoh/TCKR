@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.10.02
-Version: 0.99.4
+Date: 2025.10.10
+Version: 0.99.5
 License: GNU AGPLv3
 
 Description:
@@ -1791,16 +1791,16 @@ class TickerWindow(QtWidgets.QWidget):
                         bloom_color = QtGui.QColor(255, 255, 255)  # White
                 else:
                     bloom_color = QtGui.QColor(255, 215, 0)  # Gold for N/A
-                gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 30))
-                gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 12))
+                gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 33))
+                gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 13))
             elif area_type == 'symbol':
                 
-                gradient.setColorAt(0, QtGui.QColor(0, 179, 255, 30))
-                gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, 12))
+                gradient.setColorAt(0, QtGui.QColor(0, 179, 255, 33))
+                gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, 13))
             else:
                 # Minimal bloom for other elements like icons (don't obscure them)
-                gradient.setColorAt(0, QtGui.QColor(200, 220, 255, 12))
-                gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 5))
+                gradient.setColorAt(0, QtGui.QColor(200, 220, 255, 13))
+                gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 6))
             
             gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
             
@@ -1825,8 +1825,8 @@ class TickerWindow(QtWidgets.QWidget):
         bloom_radius = max(rect.width(), rect.height()) * 0.8
         
         gradient = QtGui.QRadialGradient(center_x, center_y, bloom_radius)
-        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 35))
-        gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 15))
+        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 39))
+        gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 17))
         gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
         
         painter.setBrush(QtGui.QBrush(gradient))
@@ -1894,48 +1894,53 @@ class TickerWindow(QtWidgets.QWidget):
         # Create horizontal glare bands (simulating light reflections on glass)
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
         
-        # Main horizontal glare band (top area)
-        glare_gradient_1 = QtGui.QLinearGradient(0, 0, 0, height)
-        glare_gradient_1.setColorAt(0, QtGui.QColor(255, 255, 255, 30))
-        glare_gradient_1.setColorAt(0.15, QtGui.QColor(255, 255, 255, 12))
-        glare_gradient_1.setColorAt(0.3, QtGui.QColor(255, 255, 255, 3))
+        # Main horizontal glare band (top 1/3 area)
+        glare_gradient_1 = QtGui.QLinearGradient(0, 0, 0, height * 0.33)
+        glare_gradient_1.setColorAt(0, QtGui.QColor(255, 255, 255, 45))
+        glare_gradient_1.setColorAt(0.4, QtGui.QColor(255, 255, 255, 20))
+        glare_gradient_1.setColorAt(0.7, QtGui.QColor(255, 255, 255, 8))
         glare_gradient_1.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
         
         painter.setBrush(QtGui.QBrush(glare_gradient_1))
         painter.setPen(QtCore.Qt.NoPen)
-        # Draw horizontal band across top
-        painter.drawRect(0, 0, width, int(height * 0.4))
+        # Draw horizontal band across top 1/3
+        painter.drawRect(0, 0, width, int(height * 0.33))
         
-        # Secondary horizontal glare (middle-upper area, slightly angled)
-        glare_gradient_2 = QtGui.QLinearGradient(0, height * 0.25, width * 0.2, height * 0.5)
-        glare_gradient_2.setColorAt(0, QtGui.QColor(200, 220, 255, 18))
-        glare_gradient_2.setColorAt(0.3, QtGui.QColor(200, 220, 255, 8))
-        glare_gradient_2.setColorAt(0.7, QtGui.QColor(200, 220, 255, 3))
+        # Secondary horizontal glare (within top 1/3, slightly angled)
+        glare_gradient_2 = QtGui.QLinearGradient(0, height * 0.15, width * 0.2, height * 0.33)
+        glare_gradient_2.setColorAt(0, QtGui.QColor(200, 220, 255, 25))
+        glare_gradient_2.setColorAt(0.4, QtGui.QColor(200, 220, 255, 12))
+        glare_gradient_2.setColorAt(0.8, QtGui.QColor(200, 220, 255, 4))
         glare_gradient_2.setColorAt(1, QtGui.QColor(200, 220, 255, 0))
         
         painter.setBrush(QtGui.QBrush(glare_gradient_2))
-        # Draw slightly slanted horizontal band
+        # Draw slightly slanted horizontal band within top 1/3
         glare_polygon_2 = QtGui.QPolygon([
-            QtCore.QPoint(0, int(height * 0.25)),
-            QtCore.QPoint(width, int(height * 0.3)),
-            QtCore.QPoint(width, int(height * 0.5)),
-            QtCore.QPoint(0, int(height * 0.45))
+            QtCore.QPoint(0, int(height * 0.15)),
+            QtCore.QPoint(width, int(height * 0.18)),
+            QtCore.QPoint(width, int(height * 0.33)),
+            QtCore.QPoint(0, int(height * 0.30))
         ])
         painter.drawPolygon(glare_polygon_2)
         
         # Add subtle glass texture (horizontal lines simulating glass surface)
-        glass_texture_color = QtGui.QColor(255, 255, 255, 3)
-        for y in range(0, height, 20):
+        # More prominent in top 1/3
+        glass_texture_color = QtGui.QColor(255, 255, 255, 5)
+        for y in range(0, int(height * 0.33), 15):
             painter.fillRect(0, y, width, 1, glass_texture_color)
+        # Lighter texture for rest of display
+        glass_texture_color_light = QtGui.QColor(255, 255, 255, 2)
+        for y in range(int(height * 0.33), height, 25):
+            painter.fillRect(0, y, width, 1, glass_texture_color_light)
         
         # Add corner highlights (where light hits glass edges)
-        # Top-left corner
-        corner_gradient = QtGui.QRadialGradient(0, 0, min(width, height) * 0.3)
-        corner_gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 20))
-        corner_gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 5))
+        # Top-left corner - enhanced for top 1/3
+        corner_gradient = QtGui.QRadialGradient(0, 0, min(width, height) * 0.35)
+        corner_gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 30))
+        corner_gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 10))
         corner_gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
         painter.setBrush(QtGui.QBrush(corner_gradient))
-        painter.drawRect(0, 0, int(width * 0.3), int(height * 0.4))
+        painter.drawRect(0, 0, int(width * 0.3), int(height * 0.33))
         
         # Bottom-right corner (dimmer)
         corner_gradient_2 = QtGui.QRadialGradient(width, height, min(width, height) * 0.2)
@@ -2173,18 +2178,23 @@ def resource_path(relative_path):
     return os.path.join(os.path.dirname(__file__), relative_path)
 
 def parse_args():
+    class CustomHelpFormatter(argparse.HelpFormatter):
+        def format_help(self):
+            help_text = super().format_help()   
+            return '\n' + help_text
+    
     parser = argparse.ArgumentParser(
         description="TCKR Stock Ticker Command Line Options",
-        add_help=False
+        formatter_class=lambda prog: CustomHelpFormatter(prog, max_help_position=48, width=120),
+        epilog="\n\n"
     )
-    parser.add_argument("--api", "-a", dest="finnhub_api_key", type=str, help="Finnhub API key")
-    parser.add_argument("--crypto-api", "-c", dest="coingecko_api_key", type=str, help="CoinGecko API key")
-    parser.add_argument("--tickers", "-t", dest="tickers", type=str, help="Comma-separated tickers (e.g. AAPL,MSFT,T)")
-    parser.add_argument("--speed", "-s", dest="speed", type=int, help="Ticker scroll speed")
-    parser.add_argument("--height", "-ht", dest="ticker_height", type=int, help="Ticker height in pixels")
-    parser.add_argument("--update-interval", "-u", dest="update_interval", type=int, help="Update interval in seconds")
-    parser.add_argument("--backup-settings", "-b", action="store_true", help="Restore settings from backup and save as current")
-    parser.add_argument("--help", "-h", action="help", help="Show help")
+    parser.add_argument("-a", "--api", dest="finnhub_api_key", type=str, help="Finnhub API key")
+    parser.add_argument("-c", "--crypto-api", dest="coingecko_api_key", type=str, help=argparse.SUPPRESS)
+    parser.add_argument("-t", "--tickers", dest="tickers", type=str, help="Comma-separated tickers (e.g. AAPL,MSFT,T)")
+    parser.add_argument("-s", "--speed", dest="speed", type=int, help="Ticker scroll speed")
+    parser.add_argument("-ht", "--height", dest="ticker_height", type=int, help="Ticker height in pixels")
+    parser.add_argument("-u", "--update-interval", dest="update_interval", type=int, help="Update interval in seconds")
+    parser.add_argument("-b", "--backup-settings", action="store_true", help="Restore settings from backup and save as current")
     return parser.parse_args()
 
 def restore_settings_from_backup():
@@ -2254,13 +2264,14 @@ def apply_command_line_settings(args):
             save_stocks([[t, f"{t}.png"] for t in tickers])
 
 def main():
+    # Parse arguments FIRST before any Qt initialization
+    args = parse_args()
+    apply_command_line_settings(args)
+
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseOpenGLES)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseDesktopOpenGL)
-
-    args = parse_args()
-    apply_command_line_settings(args)
 
     # Cleanup any orphaned appbar registrations from previous instances
     cleanup_orphaned_appbars()
