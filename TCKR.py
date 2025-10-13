@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.10.10
-Version: 0.99.5
+Date: 2025.10.13
+Version: 0.99.6
 License: GNU AGPLv3
 
 Description:
@@ -70,11 +70,11 @@ def set_appbar(hwnd, height, rect):
 
     # Register as appbar
     result = shell32.SHAppBarMessage(ABM_NEW, ctypes.byref(abd))
-    # print(f"[APPBAR] ABM_NEW result: {result}")  # Commented for less verbose output
+    print(f"[APPBAR] ABM_NEW result: {result}")
     
     # Query position - this tells us where Windows wants to place us
     shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
-    # print(f"[APPBAR] QUERYPOS returned: top={abd.rc.top}, bottom={abd.rc.bottom}")  # Commented for less verbose output
+    print(f"[APPBAR] QUERYPOS returned: top={abd.rc.top}, bottom={abd.rc.bottom}")
     
     # Force our desired position - always at the very top with exact height
     abd.rc.top = rect.top()  # Force to top of screen
@@ -84,27 +84,27 @@ def set_appbar(hwnd, height, rect):
     
     # Set the position - this reserves the space
     shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
-    # print(f"[APPBAR] SETPOS with: top={abd.rc.top}, bottom={abd.rc.bottom}, height={abd.rc.bottom - abd.rc.top}")  # Commented for less verbose output
+    print(f"[APPBAR] SETPOS with: top={abd.rc.top}, bottom={abd.rc.bottom}, height={abd.rc.bottom - abd.rc.top}")
     
     # After SETPOS, check what Windows actually gave us
     shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
     actual_reserved_height = abd.rc.bottom - abd.rc.top
-    # print(f"[APPBAR] After SETPOS, QUERYPOS shows: top={abd.rc.top}, bottom={abd.rc.bottom}, reserved={actual_reserved_height}")  # Commented for less verbose output
+    print(f"[APPBAR] After SETPOS, QUERYPOS shows: top={abd.rc.top}, bottom={abd.rc.bottom}, reserved={actual_reserved_height}")
     
     if actual_reserved_height < height:
         print(f"[APPBAR WARNING] Windows only reserved {actual_reserved_height}px instead of {height}px")
-        # Try multiple times with increasing delays
-        for attempt in range(3):
-            abd.rc.top = rect.top()
-            abd.rc.bottom = rect.top() + height
-            abd.rc.left = rect.left()
-            abd.rc.right = rect.left() + rect.width()
-            shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
-            time.sleep(0.1)
-            shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
-            if abd.rc.bottom - abd.rc.top >= height:
-                # print(f"[APPBAR] Reservation successful on attempt {attempt + 1}")  # Commented for less verbose output
-                break
+        # Try one more time with a brief pause to let Windows process the request
+        abd.rc.top = rect.top()
+        abd.rc.bottom = rect.top() + height
+        abd.rc.left = rect.left()
+        abd.rc.right = rect.left() + rect.width()
+        shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
+        time.sleep(0.05)  # Reduced delay
+        shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
+        if abd.rc.bottom - abd.rc.top >= height:
+            print(f"[APPBAR] Reservation successful on retry")
+        else:
+            print(f"[APPBAR] Space reservation limited by Windows - using available space")
     
     # Broadcast WM_SETTINGCHANGE to force all applications to recalculate work area
     # This is critical - without this, other apps may not respect the AppBar reservation
@@ -119,14 +119,21 @@ def set_appbar(hwnd, height, rect):
     user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
                                 47, 0,  # SPI_SETWORKAREA = 47
                                 SMTO_ABORTIFHUNG, 1000, None)
-    # print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE to notify all windows of work area change")  # Commented for less verbose output
+    print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE")
     
-    # Force window position using SetWindowPos as backup
+    # CRITICAL: Force window position AFTER broadcasts
+    # The broadcasts may cause Windows to reposition windows, so we need to 
+    # force our position again after the work area has been recalculated
+    time.sleep(0.05)  # Brief pause to let broadcasts process
+    
+    # Use SetWindowPos with TOPMOST to ensure we're at the absolute top
+    HWND_TOPMOST = -1
     SWP_NOSIZE = 0x0001
-    SWP_NOZORDER = 0x0004
-    SWP_NOACTIVATE = 0x0010
-    user32.SetWindowPos(hwnd, 0, rect.left(), rect.top(), 0, 0, 
-                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+    SWP_SHOWWINDOW = 0x0040
+    user32.SetWindowPos(hwnd, HWND_TOPMOST, rect.left(), rect.top(), 
+                       rect.width(), height, SWP_SHOWWINDOW)
+    
+    print(f"[APPBAR] Final SetWindowPos to y={rect.top()}")
     
     return abd.rc.top  # Return the actual top position Windows gave us
 
@@ -235,59 +242,9 @@ def cleanup_orphaned_appbars():
     if sys.platform != "win32":
         return
     
-    try:
-        import psutil
-        # Check if there are any other TCKR processes running
-        current_pid = os.getpid()
-        tckr_processes = []
-        
-        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-            try:
-                if proc.info['pid'] != current_pid:
-                    if (proc.info['name'] and 'python' in proc.info['name'].lower() and
-                        proc.info['cmdline'] and any('tckr' in str(cmd).lower() or 'q13' in str(cmd).lower() 
-                                                   for cmd in proc.info['cmdline'])):
-                        tckr_processes.append(proc.info['pid'])
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-        
-        # If no other TCKR processes found, we can safely cleanup
-        if not tckr_processes:
-            print("[STARTUP] No other TCKR processes detected, ensuring clean appbar state")
-        else:
-            print(f"[STARTUP] Found {len(tckr_processes)} other TCKR process(es), skipping cleanup")
-            
-    except ImportError:
-        # psutil not available, use basic cleanup approach
-        print("[STARTUP] Initializing appbar system (basic mode)")
-        
-        # Try to find and cleanup any existing TCKR windows by class name or title
-        user32 = ctypes.windll.user32
-        
-        # Look for windows with TCKR in the title (from previous instances)
-        def enum_windows_callback(hwnd, lParam):
-            try:
-                # Get window title
-                length = user32.GetWindowTextLengthW(hwnd)
-                if length > 0:
-                    buff = ctypes.create_unicode_buffer(length + 1)
-                    user32.GetWindowTextW(hwnd, buff, length + 1)
-                    title = buff.value
-                    
-                    # If it looks like a TCKR window, try to remove its appbar registration
-                    if 'tckr' in title.lower() or 'ticker' in title.lower():
-                        print(f"[STARTUP] Found potential orphaned TCKR window: {title}")
-                        remove_appbar(hwnd)
-            except:
-                pass
-            return True
-        
-        # Enumerate all windows to find potential orphaned TCKR windows
-        EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-        user32.EnumWindows(EnumWindowsProc(enum_windows_callback), 0)
-        
-    except Exception as e:
-        print(f"[STARTUP] Note: Appbar cleanup completed with minor issues: {e}")
+    # Skip cleanup entirely - it was causing more problems than it solved
+    # by interfering with window detection and appbar registration
+    print("[STARTUP] Skipping appbar cleanup to avoid interference")
 
 def get_settings():
     if os.path.exists(SETTINGS_FILE):
@@ -316,7 +273,8 @@ def get_settings():
         "group_crypto_first": False,
         "proxy": "",
         "cert_file": "",
-        "ticker_height": 60
+        "ticker_height": 60,
+        "global_text_glow": True  # Subtle glow on all text (less intense than 5% price change glow)
     }
 
 def save_settings(settings):
@@ -619,6 +577,9 @@ class SettingsDialog(QtWidgets.QDialog):
         self.led_glass_glare_checkbox = QtWidgets.QCheckBox("Enable Glass Cover with Glare/Reflections")
         self.led_glass_glare_checkbox.setChecked(self.settings.get("led_glass_glare", True))
 
+        self.global_text_glow_checkbox = QtWidgets.QCheckBox("Enable Subtle Text Glow (All Text)")
+        self.global_text_glow_checkbox.setChecked(self.settings.get("global_text_glow", True))
+
         self.play_sound_checkbox = QtWidgets.QCheckBox("Play Sound After Update")
         self.play_sound_checkbox.setChecked(self.settings.get("play_sound_on_update", True))
 
@@ -641,6 +602,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addRow(self.led_ghosting_checkbox)
         layout.addRow(self.led_icon_matrix_checkbox)
         layout.addRow(self.led_glass_glare_checkbox)
+        layout.addRow(self.global_text_glow_checkbox)
         layout.addRow(self.play_sound_checkbox)
 
         net_group = QtWidgets.QGroupBox("Network Settings")
@@ -696,6 +658,7 @@ class SettingsDialog(QtWidgets.QDialog):
         s["led_ghosting_effect"] = self.led_ghosting_checkbox.isChecked()
         s["led_icon_matrix"] = self.led_icon_matrix_checkbox.isChecked()
         s["led_glass_glare"] = self.led_glass_glare_checkbox.isChecked()
+        s["global_text_glow"] = self.global_text_glow_checkbox.isChecked()
         s["play_sound_on_update"] = self.play_sound_checkbox.isChecked()
         s["finnhub_api_key"] = self.finnhub_api_key_edit.text().strip()
         s["finnhub_api_key_2"] = self.finnhub_api_key_2_edit.text().strip()
@@ -729,6 +692,9 @@ class SettingsDialog(QtWidgets.QDialog):
                         widget.apply_transparency()
                     if self.original_settings.get("play_sound_on_update") != s["play_sound_on_update"]:
                         pass  # Sound setting doesn't need immediate action
+                    if self.original_settings.get("global_text_glow") != s["global_text_glow"]:
+                        # Rebuild ticker text with new glow setting
+                        widget.build_ticker_text(reset_scroll=False)
         
         # Set flag to indicate if restart is needed
         if not hasattr(self, 'needs_restart'):
@@ -888,16 +854,29 @@ def set_appbar(hwnd, height, rect):
     shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
 
 def remove_appbar(hwnd):
+    """Remove appbar registration for a specific window handle"""
+    if not hwnd:
+        return
     shell32 = ctypes.windll.shell32
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
     abd.hWnd = hwnd
-    shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
+    result = shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
+    print(f"[APPBAR] remove_appbar called for hwnd={hwnd}, result={result}")
 
 class TickerWindow(QtWidgets.QWidget):
     FLASH_DURATION_MS = 400
+    _instance_counter = 0  # Class variable to track instance numbers
+    
     def __init__(self):
         super().__init__()
+        
+        # Assign unique instance ID and set window title for identification
+        TickerWindow._instance_counter += 1
+        self.instance_id = TickerWindow._instance_counter
+        self.setWindowTitle(f"TCKR-{self.instance_id}")
+        print(f"[INIT] Creating ticker instance #{self.instance_id}")
+        
         self.setContentsMargins(0, 0, 0, 0)
         self.ticker_height = get_settings().get("ticker_height", 60)
         self.setWindowFlags(
@@ -961,20 +940,60 @@ class TickerWindow(QtWidgets.QWidget):
             screen_index = get_settings().get("screen_index", 0)
             app = QtWidgets.QApplication.instance()
             screens = app.screens()
+            print(f"[INIT] Total screens available: {len(screens)}, requested screen_index: {screen_index}")
             if 0 <= screen_index < len(screens):
                 screen = screens[screen_index]
+                print(f"[INIT] Using screen at index {screen_index}")
             else:
                 screen = app.primaryScreen()
+                print(f"[INIT] Screen index out of range, using primary screen")
+            
             rect = screen.geometry()
-            self.move(rect.left(), rect.top())
-            self.resize(rect.width(), self.ticker_height)
+            print(f"[INIT] Screen geometry: left={rect.left()}, top={rect.top()}, width={rect.width()}, height={rect.height()}")
+            
+            # Also check available geometry (excludes taskbars, etc.)
+            avail_rect = screen.availableGeometry()
+            print(f"[INIT] Available geometry: left={avail_rect.left()}, top={avail_rect.top()}, width={avail_rect.width()}, height={avail_rect.height()}")
+            
+            print(f"[INIT] Setting window geometry to: x={rect.left()}, y={rect.top()}, width={rect.width()}, height={self.ticker_height}")
+            
+            # Use setGeometry to set position and size together - more reliable than separate move/resize
+            self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
+            
+            # Verify geometry after setGeometry
+            geom = self.geometry()
+            print(f"[INIT] Window geometry after setGeometry(): x={geom.x()}, y={geom.y()}, width={geom.width()}, height={geom.height()}")
+            
+            # CRITICAL: Check for other tickers BEFORE showing this window
+            # This prevents the brief moment where both tickers are at y=0 causing Windows to reposition things
+            print(f"[INIT] Checking for other tickers before showing window...")
+            
+            # Small delay to let any existing tickers fully initialize
+            import time
+            time.sleep(0.1)
+            
+            self.check_for_other_tickers_early()
+            
+            # If we detected we're secondary, position ourselves correctly BEFORE showing
+            if hasattr(self, 'is_secondary_ticker') and self.is_secondary_ticker and hasattr(self, 'target_position_y'):
+                print(f"[INIT] Detected as secondary ticker - positioning at y={self.target_position_y} before show")
+                self.setGeometry(rect.left(), self.target_position_y, rect.width(), self.ticker_height)
             
             # Show immediately with loading screen
             self.show()
             
+            # Force position again after show - sometimes Qt repositions on show()
+            self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
+            
+            # Verify position after show
+            pos = self.pos()
+            geom = self.geometry()
+            print(f"[INIT] Window position after show(): x={pos.x()}, y={pos.y()}")
+            print(f"[INIT] Window geometry after show(): x={geom.x()}, y={geom.y()}, width={geom.width()}, height={geom.height()}")
+            
             print("[TCKR] Initialized - Starting price updates")  # Single startup message
             
-            # Setup AppBar in background (after window is visible)
+            # Setup AppBar after showing - this allows coordinate_with_other_tickers to find existing windows
             QtCore.QTimer.singleShot(100, self.setup_appbar_and_position)
             
             # Set up periodic position check to ensure we stay at top
@@ -1029,6 +1048,195 @@ class TickerWindow(QtWidgets.QWidget):
         # Wait for system to stabilize, then reposition
         QtCore.QTimer.singleShot(1500, self.setup_appbar_and_position)
 
+    def check_for_other_tickers_early(self):
+        """Check for other ticker windows before showing - sets flags for positioning"""
+        if sys.platform != "win32":
+            return
+            
+        try:
+            user32 = ctypes.windll.user32
+            ticker_windows = []
+            
+            # Get our window handle and title
+            my_hwnd = int(self.winId())
+            my_title = self.windowTitle()
+            
+            def enum_callback(hwnd, lParam):
+                try:
+                    # Skip our own window
+                    if hwnd == my_hwnd:
+                        return True
+                    
+                    # Get window title
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        title = buff.value
+                        
+                        # Skip if it's our own window by title
+                        if title == my_title:
+                            return True
+                        
+                        # Check if it's a ticker window
+                        is_ticker = (
+                            title == "TCKR" or 
+                            title.startswith("TCKR ") or 
+                            title.startswith("TCKR:") or
+                            title.startswith("TCKR-")
+                        )
+                        
+                        if is_ticker:
+                            rect = wintypes.RECT()
+                            user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                            window_height = rect.bottom - rect.top
+                            
+                            # Validate it's a real ticker window
+                            if rect.top < 500 and 30 <= window_height <= 150:
+                                ticker_windows.append({
+                                    'hwnd': hwnd,
+                                    'title': title,
+                                    'top': rect.top,
+                                    'height': window_height
+                                })
+                                print(f"[INIT] Found existing ticker: '{title}' at y={rect.top}, height={window_height}")
+                except:
+                    pass
+                return True
+            
+            # Enumerate all windows
+            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+            user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+            
+            if ticker_windows:
+                # Found other tickers - we're secondary
+                print(f"[INIT] Found {len(ticker_windows)} existing ticker(s) - will be secondary")
+                ticker_windows.sort(key=lambda x: x['top'])
+                last_ticker = ticker_windows[-1]
+                
+                self.is_secondary_ticker = True
+                self.target_position_y = last_ticker['top'] + last_ticker['height']
+                print(f"[INIT] Will position at y={self.target_position_y}")
+            else:
+                # No other tickers - we're primary
+                print(f"[INIT] No existing tickers found - will be primary")
+                self.is_secondary_ticker = False
+                
+        except Exception as e:
+            print(f"[INIT] Error checking for other tickers: {e}")
+            self.is_secondary_ticker = False
+
+    def coordinate_with_other_tickers(self):
+        """Check for other ticker windows and coordinate positioning to prevent gaps
+        Returns True if other tickers were found (indicating we should NOT register as appbar)
+        """
+        if sys.platform != "win32":
+            return False
+            
+        try:
+            user32 = ctypes.windll.user32
+            ticker_windows = []
+            
+            def enum_callback(hwnd, lParam):
+                try:
+                    # Skip our own window - check BEFORE getting title
+                    my_hwnd = int(self.winId())
+                    if hwnd == my_hwnd:
+                        return True  # Skip ourselves
+                    
+                    # Get window title to identify ticker windows
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        title = buff.value
+                        
+                        # Be VERY specific about what constitutes a ticker window
+                        # Must be EXACTLY "TCKR" or start with "TCKR " (with space) or "TCKR:" or "TCKR-"
+                        # This prevents matching File Explorer, Firefox tabs, etc.
+                        is_ticker = (
+                            title == "TCKR" or 
+                            title.startswith("TCKR ") or 
+                            title.startswith("TCKR:") or
+                            title.startswith("TCKR-")
+                        )
+                        
+                        if is_ticker:
+                            # Double-check it's not our own window by title
+                            my_title = self.windowTitle()
+                            if title == my_title:
+                                print(f"[COORDINATE] Skipping own window: '{title}' (hwnd={hwnd})")
+                                return True
+                            
+                            # Get window position
+                            rect = wintypes.RECT()
+                            user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                            
+                            # Additional validation: ticker windows should be at the top of screen
+                            # and have a height close to our ticker height (within reasonable range)
+                            window_height = rect.bottom - rect.top
+                            if rect.top < 500 and 30 <= window_height <= 150:  # Reasonable ticker dimensions
+                                ticker_windows.append({
+                                    'hwnd': hwnd,
+                                    'title': title,
+                                    'top': rect.top,
+                                    'height': window_height
+                                })
+                                print(f"[COORDINATE] Found valid ticker: '{title}' at y={rect.top}, height={window_height}")
+                            else:
+                                print(f"[COORDINATE] Rejected '{title}' - wrong position/size: y={rect.top}, height={window_height}")
+                except:
+                    pass
+                return True
+            
+            # Enumerate all windows
+            EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+            user32.EnumWindows(EnumWindowsProc(enum_callback), 0)
+            
+            print(f"[COORDINATE] Enumeration complete. Found {len(ticker_windows)} valid ticker windows")
+            
+            if ticker_windows:
+                print(f"[COORDINATE] Found {len(ticker_windows)} other ticker window(s)")
+                # If there are other tickers, we should position ourselves right after the last one
+                # Sort by top position
+                ticker_windows.sort(key=lambda x: x['top'])
+                last_ticker = ticker_windows[-1]
+                
+                # Get screen geometry for positioning
+                screen_index = get_settings().get("screen_index", 0)
+                app = QtWidgets.QApplication.instance()
+                screens = app.screens()
+                if 0 <= screen_index < len(screens):
+                    screen = screens[screen_index]
+                else:
+                    screen = app.primaryScreen()
+                screen_rect = screen.geometry()
+                
+                # Calculate where we should be positioned
+                # Position right after the last ticker (adding heights together from screen top)
+                new_top = last_ticker['top'] + last_ticker['height']
+                print(f"[COORDINATE] Last ticker at y={last_ticker['top']}, height={last_ticker['height']}")
+                print(f"[COORDINATE] Positioning this ticker at y={new_top}")
+                
+                # IMPORTANT: Store the target position for use in setup_appbar_and_position
+                self.target_position_y = new_top
+                
+                # Move to the calculated position immediately
+                self.move(screen_rect.left(), new_top)
+                
+                # Store that we're a secondary ticker
+                self.is_secondary_ticker = True
+                return True  # Found other tickers
+            
+            # No other tickers found - we're the primary
+            self.is_secondary_ticker = False
+            return False
+            
+        except Exception as e:
+            print(f"[COORDINATE] Error coordinating with other tickers: {e}")
+            self.is_secondary_ticker = False
+            return False
+
     def check_and_fix_position(self):
         """Periodically check if ticker is still at the top and fix if needed"""
         if sys.platform != "win32":
@@ -1072,6 +1280,12 @@ class TickerWindow(QtWidgets.QWidget):
 
     def setup_appbar_and_position(self):
         """Setup appbar and position window at top of selected screen"""
+        print(f"[SETUP] setup_appbar_and_position called for instance #{self.instance_id}")
+        
+        # Check current position before any changes
+        current_pos = self.pos()
+        print(f"[SETUP] Current window position at start: x={current_pos.x()}, y={current_pos.y()}")
+        
         screen_index = get_settings().get("screen_index", 0)
         app = QtWidgets.QApplication.instance()
         screens = app.screens()
@@ -1080,57 +1294,204 @@ class TickerWindow(QtWidgets.QWidget):
         else:
             screen = app.primaryScreen()
         rect = screen.geometry()
-
-        # Don't hide window - keep it visible with loading screen
         
-        # Ensure any previous appbar registration is removed
-        # This handles cases where the window was moved between screens
+        print(f"[SETUP] Target screen: left={rect.left()}, top={rect.top()}, width={rect.width()}, height={rect.height()}")
+
+        # Check if there are other ticker windows FIRST
+        print(f"[SETUP] Checking for other ticker windows...")
+        has_other_tickers = self.coordinate_with_other_tickers()
+        
+        # If we're a secondary ticker, skip ALL appbar operations
+        if hasattr(self, 'is_secondary_ticker') and self.is_secondary_ticker:
+            print(f"[APPBAR] Instance #{self.instance_id} is SECONDARY - no appbar operations")
+            
+            # Just ensure correct positioning (below other tickers)
+            if hasattr(self, 'target_position_y'):
+                self.setGeometry(rect.left(), self.target_position_y, rect.width(), self.ticker_height)
+                print(f"[APPBAR] Secondary ticker positioned at y={self.target_position_y}")
+            return  # Exit early - no appbar operations for secondary tickers
+
+        # Only reach here if we're the PRIMARY ticker
+        print(f"[APPBAR] Instance #{self.instance_id} is PRIMARY - setting up appbar")
+        
+        # Check if space is already reserved at the top (from a previous ticker)
+        user32 = ctypes.windll.user32
+        work_area = wintypes.RECT()
+        user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area), 0)  # SPI_GETWORKAREA
+        existing_reservation = work_area.top - rect.top()
+        
+        if existing_reservation > 0:
+            print(f"[APPBAR] Space already reserved at top ({existing_reservation}px)")
+            
+            # Calculate which slot we should be in
+            num_existing_slots = existing_reservation // self.ticker_height
+            print(f"[APPBAR] Existing slots: {num_existing_slots}")
+            
+            # We should be in the next slot
+            our_slot = num_existing_slots
+            target_y = rect.top() + (our_slot * self.ticker_height)
+            
+            print(f"[APPBAR] We are ticker #{our_slot + 1}, positioning at y={target_y}")
+            
+            # Position ourselves at the correct slot
+            self.setGeometry(rect.left(), target_y, rect.width(), self.ticker_height)
+            
+            # Mark as secondary (no AppBar registration to avoid conflicts)
+            self.is_secondary_ticker = True
+            self.target_position_y = target_y
+            
+            print(f"[APPBAR] Secondary ticker positioned at y={target_y} (no AppBar registration)")
+            print(f"[APPBAR] NOTE: This ticker will not reserve screen space - only primary ticker reserves space")
+            
+            # Keep our position stable
+            def check_position():
+                pos = self.pos()
+                if pos.y() != target_y:
+                    print(f"[APPBAR] Position drifted to y={pos.y()}, fixing to y={target_y}")
+                    self.setGeometry(rect.left(), target_y, rect.width(), self.ticker_height)
+            
+            QtCore.QTimer.singleShot(200, check_position)
+            QtCore.QTimer.singleShot(500, check_position)
+            QtCore.QTimer.singleShot(1000, check_position)
+            return  # Exit - we've handled this case
+        
+        print(f"[APPBAR] No existing reservation found - will register new AppBar")
+        
+        # Remove any previous appbar registration for THIS window only
         remove_appbar(int(self.winId()))
 
         def after_removal():
             """Called after appbar removal to ensure cleanup is complete"""
             def setup_new_appbar():
-                """Setup the new appbar and position window"""
+                """Setup the new appbar and position window - PRIMARY TICKER ONLY"""
+                
                 # Position window at the very top of the selected screen
-                self.move(rect.left(), rect.top())
-                self.resize(rect.width(), self.ticker_height)
+                print(f"[SETUP] PRIMARY ticker - moving to top: x={rect.left()}, y={rect.top()}")
+                self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
                 
-                # CRITICAL: Get the actual physical height after DPI scaling
-                # Qt uses logical pixels, Windows uses physical pixels
-                # Window is already shown, just need to get rect
+                # Verify position after move
+                pos = self.pos()
+                print(f"[SETUP] Position after move: x={pos.x()}, y={pos.y()}")
                 
-                # Get the actual window rect from Windows
-                user32 = ctypes.windll.user32
-                window_rect = wintypes.RECT()
-                user32.GetWindowRect(int(self.winId()), ctypes.byref(window_rect))
-                actual_physical_height = window_rect.bottom - window_rect.top
+                # Use logical height for appbar reservation to prevent over-reserving space
+                # The DPI-scaled physical height was causing too much space reservation
+                # leading to gaps between multiple ticker instances
                 
-                print(f"[DPI] Qt logical height: {self.ticker_height}, Windows physical height: {actual_physical_height}")
+                print(f"[APPBAR] Registering PRIMARY ticker as appbar: height={self.ticker_height}, screen={rect}")
+                actual_top = set_appbar(int(self.winId()), self.ticker_height, rect)
+                print(f"[APPBAR] set_appbar returned actual_top={actual_top}")
                 
-                # Register as appbar to reserve screen space at top - use ACTUAL physical height
-                print(f"[APPBAR] Registering appbar: logical_height={self.ticker_height}, physical_height={actual_physical_height}, screen={rect}")
-                actual_top = set_appbar(int(self.winId()), actual_physical_height, rect)
+                # Check position after appbar registration
+                pos = self.pos()
+                print(f"[APPBAR] Position after set_appbar: x={pos.x()}, y={pos.y()}")
+                
+                # CRITICAL FIX: After appbar registration, Windows may have moved our window
+                # Force it back to the absolute top (inside the reserved space, not below it)
+                print(f"[APPBAR] Forcing position back to absolute top: y={rect.top()}")
+                self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
+                
+                # Verify the position was set
+                pos = self.pos()
+                print(f"[APPBAR] Position after force-positioning: x={pos.x()}, y={pos.y()}")
+                
+                # If still not at top, keep trying
+                if pos.y() != rect.top():
+                    print(f"[APPBAR] WARNING: Window not at top (y={pos.y()}), forcing again...")
+                    for attempt in range(5):
+                        self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
+                        QtCore.QCoreApplication.processEvents()  # Let Qt process the move
+                        pos = self.pos()
+                        print(f"[APPBAR] Attempt {attempt+1}: Position is now y={pos.y()}")
+                        if pos.y() == rect.top():
+                            break
+                        time.sleep(0.05)
                 
                 # Window stays visible throughout
                 
-                # Force window to absolute top, ignoring other docked apps - use physical height
-                final_top = force_window_to_top(int(self.winId()), rect, actual_physical_height)
+                # Force window to absolute top using Windows API too
+                print(f"[APPBAR] Calling force_window_to_top...")
+                final_top = force_window_to_top(int(self.winId()), rect, self.ticker_height)
                 
-                # print(f"[POSITIONING] Screen top: {rect.top()}, AppBar assigned: {actual_top}, Final position: {final_top}")  # Commented for less verbose output
+                print(f"[POSITIONING] Screen top: {rect.top()}, AppBar assigned: {actual_top}, Final position: {final_top}")
                 
-                # Diagnose AppBar state to verify space reservation - use physical height
-                reserved_space = diagnose_appbar_state(int(self.winId()), actual_physical_height)
+                # Check position after force_window_to_top
+                pos = self.pos()
+                print(f"[POSITIONING] Position after force_window_to_top: x={pos.x()}, y={pos.y()}")
+                
+                # LAST RESORT: If STILL not at top, use direct Windows API
+                if pos.y() != rect.top():
+                    print(f"[POSITIONING] STILL not at top! Using aggressive Windows API positioning...")
+                    user32 = ctypes.windll.user32
+                    HWND_TOPMOST = -1
+                    SWP_SHOWWINDOW = 0x0040
+                    
+                    for attempt in range(10):
+                        user32.SetWindowPos(int(self.winId()), HWND_TOPMOST, 
+                                          rect.left(), rect.top(), 
+                                          rect.width(), self.ticker_height, 
+                                          SWP_SHOWWINDOW)
+                        time.sleep(0.05)
+                        
+                        # Check if it worked
+                        window_rect = wintypes.RECT()
+                        user32.GetWindowRect(int(self.winId()), ctypes.byref(window_rect))
+                        print(f"[POSITIONING] Aggressive attempt {attempt+1}: Window at y={window_rect.top}")
+                        if window_rect.top == rect.top():
+                            print(f"[POSITIONING] SUCCESS at attempt {attempt+1}")
+                            break
+                
+                # Diagnose AppBar state to verify space reservation - use logical height
+                reserved_space = diagnose_appbar_state(int(self.winId()), self.ticker_height)
+                
+                # CRITICAL FIX: After AppBar registration and broadcasts, Windows may reposition
+                # our window to be BELOW the reserved space instead of IN it
+                # Schedule aggressive repositioning after everything settles
+                def final_position_fix():
+                    print(f"[FINAL FIX] Checking final position...")
+                    pos = self.pos()
+                    print(f"[FINAL FIX] Current position: y={pos.y()}, expected: y={rect.top()}")
+                    
+                    if pos.y() != rect.top():
+                        print(f"[FINAL FIX] Window at wrong position! Forcing to y={rect.top()}")
+                        
+                        # Use both Qt and Windows API to force position
+                        self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
+                        
+                        user32 = ctypes.windll.user32
+                        HWND_TOPMOST = -1
+                        SWP_SHOWWINDOW = 0x0040
+                        user32.SetWindowPos(int(self.winId()), HWND_TOPMOST, 
+                                          rect.left(), rect.top(), 
+                                          rect.width(), self.ticker_height, 
+                                          SWP_SHOWWINDOW)
+                        
+                        # Verify it worked
+                        QtCore.QCoreApplication.processEvents()
+                        pos = self.pos()
+                        print(f"[FINAL FIX] Position after fix: y={pos.y()}")
+                        
+                        # If still wrong, keep trying
+                        if pos.y() != rect.top():
+                            print(f"[FINAL FIX] Still wrong, scheduling another attempt...")
+                            QtCore.QTimer.singleShot(100, final_position_fix)
+                    else:
+                        print(f"[FINAL FIX] Position correct at y={rect.top()} ✓")
+                
+                # Check position after delays to let Windows settle
+                QtCore.QTimer.singleShot(200, final_position_fix)
+                QtCore.QTimer.singleShot(500, final_position_fix)
+                QtCore.QTimer.singleShot(1000, final_position_fix)
                 
                 # If AppBar didn't reserve proper space, try manual work area adjustment
-                if reserved_space < actual_physical_height:
-                    print(f"[APPBAR] WARNING: Only {reserved_space}px reserved, expected {actual_physical_height}px (DPI scaled)")
+                if reserved_space < self.ticker_height:
+                    print(f"[APPBAR] WARNING: Only {reserved_space}px reserved, expected {self.ticker_height}px")
                     print(f"[APPBAR] Attempting manual work area adjustment...")
                     
                     # Get current screen geometry
                     user32 = ctypes.windll.user32
                     work_area = wintypes.RECT()
                     work_area.left = rect.left()
-                    work_area.top = rect.top() + actual_physical_height  # Reserve space for ticker with DPI scaling
+                    work_area.top = rect.top() + self.ticker_height  # Reserve space for ticker
                     work_area.right = rect.right()
                     work_area.bottom = rect.bottom()
                     
@@ -1144,23 +1505,24 @@ class TickerWindow(QtWidgets.QWidget):
                     
                     # Re-diagnose after manual adjustment
                     time.sleep(0.2)
-                    diagnose_appbar_state(int(self.winId()), actual_physical_height)
+                    diagnose_appbar_state(int(self.winId()), self.ticker_height)
                 
-                # Retry mechanism to ensure proper positioning
-                def verify_and_fix():
-                    actual_pos = self.pos()
-                    if actual_pos.y() > rect.top():
-                        print(f"[POSITIONING] Window drifted to {actual_pos.y()}, forcing back to {rect.top()}")
-                        self.move(rect.left(), rect.top())
-                        # Re-register appbar to ensure space is reserved - use physical height
-                        set_appbar(int(self.winId()), actual_physical_height, rect)
-                        # Re-diagnose after fix
-                        diagnose_appbar_state(int(self.winId()), actual_physical_height)
+                # DISABLED: Retry mechanism was causing problems when multiple tickers launched
+                # The verify_and_fix callbacks would re-register appbar and cause position issues
+                # def verify_and_fix():
+                #     actual_pos = self.pos()
+                #     if actual_pos.y() > rect.top():
+                #         print(f"[POSITIONING] Window drifted to {actual_pos.y()}, forcing back to {rect.top()}")
+                #         self.move(rect.left(), rect.top())
+                #         # Re-register appbar to ensure space is reserved - use logical height
+                #         set_appbar(int(self.winId()), self.ticker_height, rect)
+                #         # Re-diagnose after fix
+                #         diagnose_appbar_state(int(self.winId()), self.ticker_height)
                 
                 # Multiple verification passes to ensure proper positioning
-                QtCore.QTimer.singleShot(100, verify_and_fix)
-                QtCore.QTimer.singleShot(500, verify_and_fix)
-                QtCore.QTimer.singleShot(1000, verify_and_fix)
+                # QtCore.QTimer.singleShot(100, verify_and_fix)
+                # QtCore.QTimer.singleShot(500, verify_and_fix)
+                # QtCore.QTimer.singleShot(1000, verify_and_fix)
                 
             QtCore.QTimer.singleShot(250, setup_new_appbar)
         QtCore.QTimer.singleShot(300, after_removal)
@@ -1298,6 +1660,30 @@ class TickerWindow(QtWidgets.QWidget):
                     elapsed = current_time - start_time
                     active_effects.append(f"{symbol}({elapsed:.0f}s)")
                 print(f"[GLOW] Active effects: {active_effects}")
+
+    def draw_text_with_global_glow(self, painter, x, y, text, text_color, glow_color=None):
+        """
+        Draw text with optional global glow effect.
+        If glow_color is None and global_text_glow is enabled, uses a subtle white glow.
+        """
+        settings = get_settings()
+        
+        # Apply global glow if enabled (subtle white glow for all text)
+        if settings.get("global_text_glow", True) and glow_color is None:
+            # Much less intense than 5% glow (alpha 15 vs 50)
+            glow_color = QtGui.QColor(255, 255, 255, 15)
+        
+        # Draw glow halo if we have a glow color
+        if glow_color:
+            painter.setPen(glow_color)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx != 0 or dy != 0:  # Don't draw at center position
+                        painter.drawText(x + dx, y + dy, text)
+        
+        # Draw main text
+        painter.setPen(text_color)
+        painter.drawText(x, y, text)
 
     def get_glow_effect(self, symbol, change_percent):
         """Get glow effect for significant price changes"""
@@ -1584,9 +1970,8 @@ class TickerWindow(QtWidgets.QWidget):
             # Center text vertically
             tkr_y = (self.ticker_height + metrics.ascent() - metrics.descent()) // 2
             symbol_rect = QtCore.QRect(x, 0, tkr_width, self.ticker_height)
-            painter.setPen(QtGui.QColor("#00B3FF"))
             painter.setFont(self.ticker_font)
-            painter.drawText(x, tkr_y, tkr)
+            self.draw_text_with_global_glow(painter, x, tkr_y, tkr, QtGui.QColor("#00B3FF"))
             x += tkr_width
             price_y = tkr_y
             if price is not None and prev is not None:
@@ -1609,19 +1994,21 @@ class TickerWindow(QtWidgets.QWidget):
             
             price_rect = QtCore.QRect(x, 0, price_width, self.ticker_height)
             
+            # Draw price text with appropriate glow
+            painter.setFont(self.ticker_font)
             if glow_color:
-                # Draw glow effect around the price text
+                # Draw 5% glow effect (more intense, colored) - replaces global glow
                 painter.setPen(glow_color)
-                painter.setFont(self.ticker_font)
                 for dx in [-2, -1, 0, 1, 2]:
                     for dy in [-2, -1, 0, 1, 2]:
-                        if dx != 0 or dy != 0:  # Don't draw at center position
+                        if dx != 0 or dy != 0:
                             painter.drawText(x + dx, price_y + dy, price_text)
-            
-            # Draw main price text
-            painter.setPen(price_color)
-            painter.setFont(self.ticker_font)
-            painter.drawText(x, price_y, price_text)
+                # Draw main price text without global glow (5% glow is sufficient)
+                painter.setPen(price_color)
+                painter.drawText(x, price_y, price_text)
+            else:
+                # No 5% glow, use global glow if enabled
+                self.draw_text_with_global_glow(painter, x, price_y, price_text, price_color)
             x += price_width
             if change_text or pct_text:
                 painter.setFont(small_font)
@@ -1635,25 +2022,29 @@ class TickerWindow(QtWidgets.QWidget):
                 else:
                     color = QtGui.QColor("#FFFFFF")  # White for zero change
                 
-                # Apply glow effect to change text if active
+                painter.setFont(small_font)
+                
+                # Apply glow effect to change text if 5% glow is active
                 if glow_color:
                     painter.setPen(glow_color)
-                    painter.setFont(small_font)
                     for dx in [-2, -1, 0, 1, 2]:
                         for dy in [-2, -1, 0, 1, 2]:
-                            if dx != 0 or dy != 0:  # Don't draw at center position
+                            if dx != 0 or dy != 0:
                                 painter.drawText(x + 10 + dx, stacked_top + dy, change_text)
                                 painter.drawText(x + 10 + dx, stacked_top + small_metrics.height() + 2 + dy, pct_text)
+                    # Draw main text without global glow (5% glow is sufficient)
+                    painter.setPen(color)
+                    painter.drawText(x + 10, stacked_top, change_text)
+                    painter.drawText(x + 10, stacked_top + small_metrics.height() + 2, pct_text)
+                else:
+                    # No 5% glow, use global glow if enabled
+                    self.draw_text_with_global_glow(painter, x + 10, stacked_top, change_text, color)
+                    self.draw_text_with_global_glow(painter, x + 10, stacked_top + small_metrics.height() + 2, pct_text, color)
                 
-                painter.setPen(color)
-                painter.setFont(small_font)
-                painter.drawText(x + 10, stacked_top, change_text)
-                painter.drawText(x + 10, stacked_top + small_metrics.height() + 2, pct_text)
                 painter.setFont(self.ticker_font)
                 x += 10 + change_width
-            painter.setPen(QtGui.QColor("#00B3FF"))
             painter.setFont(self.ticker_font)
-            painter.drawText(x, tkr_y, sep)
+            self.draw_text_with_global_glow(painter, x, tkr_y, sep, QtGui.QColor("#00B3FF"))
             painter.end()
             self.ticker_pixmaps.append(pixmap)
             self.ticker_pixmap_widths.append(total_width)
@@ -1677,11 +2068,14 @@ class TickerWindow(QtWidgets.QWidget):
         donate_y = donate_height // 2 + metrics.ascent() // 2
         for i, char in enumerate(donate_text):
             color = QtGui.QColor(colors[i])
-            painter.setPen(QtGui.QColor("black"))
             painter.setFont(donate_font)
+            
+            # Draw shadow
+            painter.setPen(QtGui.QColor("black"))
             painter.drawText(x + 1, donate_y + 1, char)
-            painter.setPen(color)
-            painter.drawText(x, donate_y, char)
+            
+            # Draw character with global glow
+            self.draw_text_with_global_glow(painter, x, donate_y, char, color)
             x += metrics.horizontalAdvance(char)
         painter.end()
         self._donate_pixmap = donate_pixmap
@@ -1993,8 +2387,7 @@ class TickerWindow(QtWidgets.QWidget):
             text_width = metrics.horizontalAdvance(text)
             x = (width - text_width) // 2
             y = (height + metrics.ascent()) // 2
-            painter.setPen(QtGui.QColor("#FFD700"))
-            painter.drawText(x, y, text)
+            self.draw_text_with_global_glow(painter, x, y, text, QtGui.QColor("#FFD700"))
             painter.end()
             return
         if not self.ticker_pixmaps:
