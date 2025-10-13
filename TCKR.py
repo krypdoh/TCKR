@@ -1593,7 +1593,7 @@ class TickerWindow(QtWidgets.QWidget):
                 if price > prev:
                     price_color = QtGui.QColor("#00FF40")
                 elif price < prev:
-                    price_color = QtGui.QColor("#FF4040")
+                    price_color = QtGui.QColor("#FF5555")
                 else:
                     price_color = QtGui.QColor("#FFFFFF")  # White for unchanged price
             else:
@@ -1631,7 +1631,7 @@ class TickerWindow(QtWidgets.QWidget):
                 if change_text.startswith("+"):
                     color = QtGui.QColor("#00FF40")  # Green
                 elif change_text.startswith("-"):
-                    color = QtGui.QColor("#FF4040")  # Red
+                    color = QtGui.QColor("#FF5555")  # Red
                 else:
                     color = QtGui.QColor("#FFFFFF")  # White for zero change
                 
@@ -1786,7 +1786,7 @@ class TickerWindow(QtWidgets.QWidget):
                     if price > prev:
                         bloom_color = QtGui.QColor(0, 255, 64)  # Green
                     elif price < prev:
-                        bloom_color = QtGui.QColor(255, 64, 64)  # Red
+                        bloom_color = QtGui.QColor(255, 85, 85)  # Red
                     else:
                         bloom_color = QtGui.QColor(255, 255, 255)  # White
                 else:
