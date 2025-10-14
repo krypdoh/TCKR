@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.10.13
-Version: 0.99.6
+Date: 2025.10.14
+Version: 0.99.7 
 License: GNU AGPLv3
 
 Description:
@@ -37,6 +37,12 @@ ABM_QUERYPOS = 0x00000002
 ABM_SETPOS = 0x00000003
 ABE_TOP = 1
 
+# AppBar notification messages
+ABN_STATECHANGE = 0x00000000
+ABN_POSCHANGED = 0x00000001
+ABN_FULLSCREENAPP = 0x00000002
+ABN_WINDOWARRANGE = 0x00000003
+
 class APPBARDATA(ctypes.Structure):
     _fields_ = [
         ('cbSize', wintypes.DWORD),
@@ -57,54 +63,73 @@ def set_appbar(hwnd, height, rect):
     except:
         pass
 
+    # CRITICAL: Get the ACTUAL physical window height FIRST
+    # On high-DPI screens, Qt's logical pixels differ from Windows physical pixels
+    # We need to use the physical height for AppBar registration
+    actual_window_rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(actual_window_rect))
+    actual_window_height = actual_window_rect.bottom - actual_window_rect.top
+    print(f"[APPBAR] Logical height requested: {height}px, Actual window height: {actual_window_height}px")
+    
+    # Use the actual physical height for AppBar registration
+    appbar_height = actual_window_height
+
     msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
     abd.hWnd = hwnd
     abd.uCallbackMessage = msg_id
     abd.uEdge = ABE_TOP
+    
+    # CRITICAL: Use the full screen coordinates for the AppBar
+    # rect.right() gives us the right edge coordinate (left + width)
     abd.rc.left = rect.left()
     abd.rc.top = rect.top()
-    abd.rc.right = rect.left() + rect.width()
-    abd.rc.bottom = rect.top() + height
+    abd.rc.right = rect.right()  # Use rect.right() which is left + width
+    abd.rc.bottom = rect.top() + appbar_height  # Use ACTUAL physical height
 
     # Register as appbar
     result = shell32.SHAppBarMessage(ABM_NEW, ctypes.byref(abd))
     print(f"[APPBAR] ABM_NEW result: {result}")
+    print(f"[APPBAR] Registration: left={abd.rc.left}, top={abd.rc.top}, right={abd.rc.right}, bottom={abd.rc.bottom}, width={abd.rc.right - abd.rc.left}")
     
     # Query position - this tells us where Windows wants to place us
     shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
     print(f"[APPBAR] QUERYPOS returned: top={abd.rc.top}, bottom={abd.rc.bottom}")
     
-    # Force our desired position - always at the very top with exact height
-    abd.rc.top = rect.top()  # Force to top of screen
-    abd.rc.bottom = rect.top() + height  # Exact height we want to reserve
+    # CRITICAL: Set the proposed rectangle coordinates with PHYSICAL height
+    # For top edge, we want the full width of the screen
     abd.rc.left = rect.left()
-    abd.rc.right = rect.left() + rect.width()
+    abd.rc.top = rect.top()  # Always at the very top
+    abd.rc.right = rect.right()  # Full width
+    abd.rc.bottom = rect.top() + appbar_height  # Reserve using ACTUAL physical height
     
     # Set the position - this reserves the space
     shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
-    print(f"[APPBAR] SETPOS with: top={abd.rc.top}, bottom={abd.rc.bottom}, height={abd.rc.bottom - abd.rc.top}")
+    print(f"[APPBAR] SETPOS with: left={abd.rc.left}, top={abd.rc.top}, right={abd.rc.right}, bottom={abd.rc.bottom}, height={abd.rc.bottom - abd.rc.top}")
     
     # After SETPOS, check what Windows actually gave us
     shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
     actual_reserved_height = abd.rc.bottom - abd.rc.top
     print(f"[APPBAR] After SETPOS, QUERYPOS shows: top={abd.rc.top}, bottom={abd.rc.bottom}, reserved={actual_reserved_height}")
     
-    if actual_reserved_height < height:
-        print(f"[APPBAR WARNING] Windows only reserved {actual_reserved_height}px instead of {height}px")
+    if actual_reserved_height < appbar_height:
+        print(f"[APPBAR WARNING] Windows only reserved {actual_reserved_height}px instead of {appbar_height}px")
         # Try one more time with a brief pause to let Windows process the request
         abd.rc.top = rect.top()
-        abd.rc.bottom = rect.top() + height
+        abd.rc.bottom = rect.top() + appbar_height
         abd.rc.left = rect.left()
-        abd.rc.right = rect.left() + rect.width()
+        abd.rc.right = rect.right()
         shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
         time.sleep(0.05)  # Reduced delay
         shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
-        if abd.rc.bottom - abd.rc.top >= height:
+        if abd.rc.bottom - abd.rc.top >= appbar_height:
             print(f"[APPBAR] Reservation successful on retry")
         else:
             print(f"[APPBAR] Space reservation limited by Windows - using available space")
+    
+    # Use the actual physical window height for work area reservation
+    work_area_top_offset = actual_window_height
     
     # Broadcast WM_SETTINGCHANGE to force all applications to recalculate work area
     # This is critical - without this, other apps may not respect the AppBar reservation
@@ -112,28 +137,79 @@ def set_appbar(hwnd, height, rect):
     WM_SETTINGCHANGE = 0x001A
     SMTO_ABORTIFHUNG = 0x0002
     
-    # Try multiple broadcast methods
-    user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, 
-                                "Policy".encode('utf-16le'), 
-                                SMTO_ABORTIFHUNG, 1000, None)
+    # CRITICAL FIX: Verify and enforce work area adjustment
+    # Get monitor info to calculate work area
+    monitor_info = wintypes.RECT()
+    monitor_info.left = rect.left()
+    monitor_info.top = rect.top()
+    monitor_info.right = rect.right()
+    monitor_info.bottom = rect.bottom()
+    
+    # Check current work area
+    work_area_before = wintypes.RECT()
+    user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_before), 0)  # SPI_GETWORKAREA = 48
+    print(f"[APPBAR] Work area BEFORE: top={work_area_before.top}, bottom={work_area_before.bottom}")
+    
+    # After setting AppBar position, Windows should have adjusted work area automatically
+    # Let's verify
+    work_area_check = wintypes.RECT()
+    user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_check), 0)
+    print(f"[APPBAR] Work area AFTER SETPOS: top={work_area_check.top}, expected={rect.top() + work_area_top_offset}")
+    
+    # CRITICAL: Manually set work area to ensure other apps respect our space
+    # The AppBar API should do this automatically, but it doesn't always work reliably
+    # We only do this during initial setup, not in response to ABN_POSCHANGED (which would cause a loop)
+    # Use the actual physical window height (work_area_top_offset) not the logical height
+    if work_area_check.top < (rect.top() + work_area_top_offset):
+        print(f"[APPBAR] Work area not adjusted by AppBar API - manually setting it")
+        new_work_area = wintypes.RECT()
+        new_work_area.left = rect.left()
+        new_work_area.top = rect.top() + work_area_top_offset  # Use ACTUAL window height
+        new_work_area.right = rect.right()
+        new_work_area.bottom = rect.bottom()
+        
+        # Set the work area without triggering file system updates
+        SPI_SETWORKAREA = 47
+        SPIF_SENDCHANGE = 0x0002  # Broadcast change but don't update INI files
+        result = user32.SystemParametersInfoW(SPI_SETWORKAREA, 0, 
+                                             ctypes.byref(new_work_area), 
+                                             SPIF_SENDCHANGE)
+        print(f"[APPBAR] SystemParametersInfo(SPI_SETWORKAREA) result: {result}")
+        print(f"[APPBAR] Set work area top to: {new_work_area.top} (screen top {rect.top()} + actual window height {work_area_top_offset})")
+        
+        # Small delay to let Windows process the change
+        time.sleep(0.1)
+        
+        # Verify it worked
+        work_area_verify = wintypes.RECT()
+        user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_verify), 0)
+        print(f"[APPBAR] Work area after manual adjustment: top={work_area_verify.top}")
+    else:
+        print(f"[APPBAR] Work area already correctly set at top={work_area_check.top}")
+    
+    # Broadcast WM_SETTINGCHANGE with work area change to notify other apps
+    # This is separate from the SystemParametersInfo call above
     user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
                                 47, 0,  # SPI_SETWORKAREA = 47
-                                SMTO_ABORTIFHUNG, 1000, None)
-    print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE")
+                                SMTO_ABORTIFHUNG, 2000, None)
     
-    # CRITICAL: Force window position AFTER broadcasts
+    print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE to all windows")
+    
+    # CRITICAL: Force window position AFTER broadcasts using SetWindowPos
     # The broadcasts may cause Windows to reposition windows, so we need to 
     # force our position again after the work area has been recalculated
     time.sleep(0.05)  # Brief pause to let broadcasts process
     
-    # Use SetWindowPos with TOPMOST to ensure we're at the absolute top
+    # Use SetWindowPos with TOPMOST and NOACTIVATE to ensure we're at the absolute top
+    # but don't steal focus from other windows
     HWND_TOPMOST = -1
-    SWP_NOSIZE = 0x0001
+    SWP_NOACTIVATE = 0x0010
     SWP_SHOWWINDOW = 0x0040
+    # Use actual_window_height (physical pixels) instead of height (logical pixels)
     user32.SetWindowPos(hwnd, HWND_TOPMOST, rect.left(), rect.top(), 
-                       rect.width(), height, SWP_SHOWWINDOW)
+                       rect.width(), actual_window_height, SWP_SHOWWINDOW | SWP_NOACTIVATE)
     
-    print(f"[APPBAR] Final SetWindowPos to y={rect.top()}")
+    print(f"[APPBAR] Final SetWindowPos to x={rect.left()}, y={rect.top()}, width={rect.width()}, height={actual_window_height}")
     
     return abd.rc.top  # Return the actual top position Windows gave us
 
@@ -197,12 +273,50 @@ def get_work_area(rect):
     return work_area
 
 def remove_appbar(hwnd):
+    """Remove the AppBar registration and restore the work area"""
     shell32 = ctypes.windll.shell32
+    user32 = ctypes.windll.user32
+    
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
     abd.hWnd = hwnd
     result = shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
     print(f"[APPBAR] ABM_REMOVE result: {result}")
+    
+    # CRITICAL: Restore work area after removing AppBar
+    # Get the screen dimensions to reset work area to full screen
+    if sys.platform == "win32":
+        # Get primary monitor info
+        from ctypes import wintypes
+        
+        # Get the full screen rectangle
+        screen_width = user32.GetSystemMetrics(0)  # SM_CXSCREEN
+        screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
+        
+        # Reset work area to full screen (minus taskbar if present)
+        # Setting all zeros tells Windows to recalculate based on remaining AppBars
+        work_area = wintypes.RECT()
+        work_area.left = 0
+        work_area.top = 0
+        work_area.right = screen_width
+        work_area.bottom = screen_height
+        
+        # Let Windows recalculate the work area based on remaining AppBars (like taskbar)
+        SPI_SETWORKAREA = 47
+        SPIF_SENDCHANGE = 0x0002
+        user32.SystemParametersInfoW(SPI_SETWORKAREA, 0, 
+                                     ctypes.byref(work_area), 
+                                     SPIF_SENDCHANGE)
+        
+        # Broadcast the change so all apps reposition
+        HWND_BROADCAST = 0xFFFF
+        WM_SETTINGCHANGE = 0x001A
+        SMTO_ABORTIFHUNG = 0x0002
+        user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
+                                  SPI_SETWORKAREA, 0,
+                                  SMTO_ABORTIFHUNG, 2000, None)
+        
+        print(f"[APPBAR] Work area restored and broadcast sent")
 
 def diagnose_appbar_state(hwnd, expected_height):
     """Diagnose the current AppBar state and work area to help troubleshoot reservation issues"""
@@ -833,37 +947,6 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             self.ticker_window.raise_()
             self.ticker_window.activateWindow()
 
-def set_appbar(hwnd, height, rect):
-    shell32 = ctypes.windll.shell32
-    user32 = ctypes.windll.user32
-
-    msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
-    abd = APPBARDATA()
-    abd.cbSize = ctypes.sizeof(APPBARDATA)
-    abd.hWnd = hwnd
-    abd.uCallbackMessage = msg_id
-    abd.uEdge = ABE_TOP
-    abd.rc.left = rect.left()
-    abd.rc.top = rect.top()
-    abd.rc.right = rect.left() + rect.width()
-    abd.rc.bottom = rect.top() + height
-
-    shell32.SHAppBarMessage(ABM_NEW, ctypes.byref(abd))
-    shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
-    abd.rc.bottom = abd.rc.top + height
-    shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
-
-def remove_appbar(hwnd):
-    """Remove appbar registration for a specific window handle"""
-    if not hwnd:
-        return
-    shell32 = ctypes.windll.shell32
-    abd = APPBARDATA()
-    abd.cbSize = ctypes.sizeof(APPBARDATA)
-    abd.hWnd = hwnd
-    result = shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
-    print(f"[APPBAR] remove_appbar called for hwnd={hwnd}, result={result}")
-
 class TickerWindow(QtWidgets.QWidget):
     FLASH_DURATION_MS = 400
     _instance_counter = 0  # Class variable to track instance numbers
@@ -876,6 +959,9 @@ class TickerWindow(QtWidgets.QWidget):
         self.instance_id = TickerWindow._instance_counter
         self.setWindowTitle(f"TCKR-{self.instance_id}")
         print(f"[INIT] Creating ticker instance #{self.instance_id}")
+        
+        # Track when we last set the work area to ignore feedback notifications
+        self._last_work_area_set_time = 0
         
         self.setContentsMargins(0, 0, 0, 0)
         self.ticker_height = get_settings().get("ticker_height", 60)
@@ -982,6 +1068,26 @@ class TickerWindow(QtWidgets.QWidget):
             # Show immediately with loading screen
             self.show()
             
+            # Set extended window style to ensure proper behavior as an AppBar/toolbar
+            # This helps prevent other windows from displacing us
+            if sys.platform == "win32":
+                hwnd = int(self.winId())
+                user32 = ctypes.windll.user32
+                GWL_EXSTYLE = -20
+                WS_EX_TOOLWINDOW = 0x00000080  # Exclude from taskbar
+                WS_EX_TOPMOST = 0x00000008     # Always on top
+                WS_EX_NOACTIVATE = 0x08000000  # Don't activate when clicked
+                
+                # Get current extended style
+                ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                
+                # Add our desired styles
+                new_ex_style = ex_style | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+                
+                # Set the new extended style
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_ex_style)
+                print(f"[INIT] Set extended window style: 0x{new_ex_style:08X}")
+            
             # Force position again after show - sometimes Qt repositions on show()
             self.setGeometry(rect.left(), rect.top(), rect.width(), self.ticker_height)
             
@@ -1079,11 +1185,11 @@ class TickerWindow(QtWidgets.QWidget):
                             return True
                         
                         # Check if it's a ticker window
+                        # Be VERY strict - only match our exact window title pattern
+                        # Don't match File Explorer, Firefox tabs, etc. that might contain "TCKR" in the path
                         is_ticker = (
                             title == "TCKR" or 
-                            title.startswith("TCKR ") or 
-                            title.startswith("TCKR:") or
-                            title.startswith("TCKR-")
+                            (title.startswith("TCKR-") and title[5:].isdigit())  # TCKR-1, TCKR-2, etc.
                         )
                         
                         if is_ticker:
@@ -1091,9 +1197,13 @@ class TickerWindow(QtWidgets.QWidget):
                             user32.GetWindowRect(hwnd, ctypes.byref(rect))
                             window_height = rect.bottom - rect.top
                             
-                            # Validate it's a real ticker window
-                            if rect.top < 500 and 30 <= window_height <= 150:
-                                ticker_windows.append({
+                            # CRITICAL: Filter out hidden/minimized windows
+                            # Windows uses negative values (like -32000) for hidden windows
+                            # Only consider windows that are actually visible on screen
+                            if rect.top >= 0 and rect.top < 500 and 30 <= window_height <= 150:
+                                # Also check if window is visible
+                                if user32.IsWindowVisible(hwnd):
+                                    ticker_windows.append({
                                     'hwnd': hwnd,
                                     'title': title,
                                     'top': rect.top,
@@ -1152,13 +1262,11 @@ class TickerWindow(QtWidgets.QWidget):
                         title = buff.value
                         
                         # Be VERY specific about what constitutes a ticker window
-                        # Must be EXACTLY "TCKR" or start with "TCKR " (with space) or "TCKR:" or "TCKR-"
-                        # This prevents matching File Explorer, Firefox tabs, etc.
+                        # Must be EXACTLY "TCKR" or "TCKR-<number>" format
+                        # This prevents matching File Explorer, Firefox tabs, etc. that might have "TCKR" in the path
                         is_ticker = (
                             title == "TCKR" or 
-                            title.startswith("TCKR ") or 
-                            title.startswith("TCKR:") or
-                            title.startswith("TCKR-")
+                            (title.startswith("TCKR-") and len(title) > 5 and title[5:].isdigit())
                         )
                         
                         if is_ticker:
@@ -1175,14 +1283,22 @@ class TickerWindow(QtWidgets.QWidget):
                             # Additional validation: ticker windows should be at the top of screen
                             # and have a height close to our ticker height (within reasonable range)
                             window_height = rect.bottom - rect.top
-                            if rect.top < 500 and 30 <= window_height <= 150:  # Reasonable ticker dimensions
-                                ticker_windows.append({
-                                    'hwnd': hwnd,
-                                    'title': title,
-                                    'top': rect.top,
-                                    'height': window_height
-                                })
-                                print(f"[COORDINATE] Found valid ticker: '{title}' at y={rect.top}, height={window_height}")
+                            
+                            # CRITICAL: Filter out hidden/minimized windows
+                            # Windows uses negative values (like -32000) for hidden windows
+                            # Only consider windows that are actually visible on screen
+                            if rect.top >= 0 and rect.top < 500 and 30 <= window_height <= 150:
+                                # Also check if window is visible
+                                if user32.IsWindowVisible(hwnd):
+                                    ticker_windows.append({
+                                        'hwnd': hwnd,
+                                        'title': title,
+                                        'top': rect.top,
+                                        'height': window_height
+                                    })
+                                    print(f"[COORDINATE] Found valid ticker: '{title}' at y={rect.top}, height={window_height}")
+                                else:
+                                    print(f"[COORDINATE] Rejected '{title}' - window not visible")
                             else:
                                 print(f"[COORDINATE] Rejected '{title}' - wrong position/size: y={rect.top}, height={window_height}")
                 except:
@@ -1323,32 +1439,45 @@ class TickerWindow(QtWidgets.QWidget):
         if existing_reservation > 0:
             print(f"[APPBAR] Space already reserved at top ({existing_reservation}px)")
             
-            # Calculate which slot we should be in
-            num_existing_slots = existing_reservation // self.ticker_height
-            print(f"[APPBAR] Existing slots: {num_existing_slots}")
+            # CRITICAL: Get our actual physical window height for slot calculation
+            # We need to use physical pixels, not logical pixels
+            hwnd = int(self.winId())
+            actual_window_rect = wintypes.RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(actual_window_rect))
+            actual_window_height = actual_window_rect.bottom - actual_window_rect.top
+            print(f"[APPBAR] Our window: logical height={self.ticker_height}px, physical height={actual_window_height}px")
+            
+            # Calculate which slot we should be in using PHYSICAL height
+            num_existing_slots = existing_reservation // actual_window_height
+            print(f"[APPBAR] Existing slots: {num_existing_slots} (using physical height {actual_window_height}px)")
             
             # We should be in the next slot
             our_slot = num_existing_slots
-            target_y = rect.top() + (our_slot * self.ticker_height)
+            target_y_physical = rect.top() + (our_slot * actual_window_height)
             
-            print(f"[APPBAR] We are ticker #{our_slot + 1}, positioning at y={target_y}")
+            # Convert physical pixels back to logical pixels for Qt
+            # The ratio is: actual_window_height (physical) / self.ticker_height (logical)
+            scale_factor = actual_window_height / self.ticker_height if self.ticker_height > 0 else 2.0
+            target_y_logical = target_y_physical / scale_factor
             
-            # Position ourselves at the correct slot
-            self.setGeometry(rect.left(), target_y, rect.width(), self.ticker_height)
+            print(f"[APPBAR] We are ticker #{our_slot + 1}, positioning at y={target_y_physical}px (physical) = {target_y_logical}px (logical)")
+            
+            # Position ourselves at the correct slot using LOGICAL pixels for Qt
+            self.setGeometry(rect.left(), int(target_y_logical), rect.width(), self.ticker_height)
             
             # Mark as secondary (no AppBar registration to avoid conflicts)
             self.is_secondary_ticker = True
-            self.target_position_y = target_y
+            self.target_position_y = int(target_y_logical)
             
-            print(f"[APPBAR] Secondary ticker positioned at y={target_y} (no AppBar registration)")
+            print(f"[APPBAR] Secondary ticker positioned at y={target_y_logical} (no AppBar registration)")
             print(f"[APPBAR] NOTE: This ticker will not reserve screen space - only primary ticker reserves space")
             
             # Keep our position stable
             def check_position():
                 pos = self.pos()
-                if pos.y() != target_y:
-                    print(f"[APPBAR] Position drifted to y={pos.y()}, fixing to y={target_y}")
-                    self.setGeometry(rect.left(), target_y, rect.width(), self.ticker_height)
+                if pos.y() != int(target_y_logical):
+                    print(f"[APPBAR] Position drifted to y={pos.y()}, fixing to y={int(target_y_logical)}")
+                    self.setGeometry(rect.left(), int(target_y_logical), rect.width(), self.ticker_height)
             
             QtCore.QTimer.singleShot(200, check_position)
             QtCore.QTimer.singleShot(500, check_position)
@@ -1379,6 +1508,12 @@ class TickerWindow(QtWidgets.QWidget):
                 
                 print(f"[APPBAR] Registering PRIMARY ticker as appbar: height={self.ticker_height}, screen={rect}")
                 actual_top = set_appbar(int(self.winId()), self.ticker_height, rect)
+                
+                # Mark the time we set the work area to ignore feedback notifications
+                import time as time_module
+                self._last_work_area_set_time = time_module.time()
+                print(f"[APPBAR] Work area set time recorded: {self._last_work_area_set_time}")
+                
                 print(f"[APPBAR] set_appbar returned actual_top={actual_top}")
                 
                 # Check position after appbar registration
@@ -2489,11 +2624,16 @@ class TickerWindow(QtWidgets.QWidget):
         # Only process Windows messages
         if eventType != "windows_generic_MSG":
             return False, 0
+        
+        if sys.platform != "win32":
+            return False, 0
+            
         import ctypes
         from ctypes import wintypes
         user32 = ctypes.windll.user32
         msg_id = user32.RegisterWindowMessageW("TCKR_APPBAR_MESSAGE")
         msg_ptr = int(message)
+        
         class MSG(ctypes.Structure):
             _fields_ = [
                 ("hwnd", wintypes.HWND),
@@ -2504,11 +2644,94 @@ class TickerWindow(QtWidgets.QWidget):
                 ("pt_x", wintypes.LONG),
                 ("pt_y", wintypes.LONG),
             ]
+        
         msg = MSG.from_address(msg_ptr)
+        
         if msg.message == msg_id:
             # AppBar callback received
-            # Optionally handle ABN_POSCHANGED, ABN_FULLSCREENAPP, etc.
+            notification = msg.wParam
+            print(f"[APPBAR EVENT] Received notification: {notification}")
+            
+            # ABN_POSCHANGED (1) - Another appbar changed position/size
+            if notification == ABN_POSCHANGED:
+                print(f"[APPBAR EVENT] ABN_POSCHANGED - Another appbar changed, reaffirming our position")
+                
+                # Prevent infinite loop - ignore notifications that occur shortly after we set the work area
+                # This prevents our own work area changes from triggering a feedback loop
+                import time as time_module
+                current_time = time_module.time()
+                time_since_last_set = current_time - self._last_work_area_set_time
+                
+                if time_since_last_set < 2.0:  # Ignore notifications within 2 seconds of our work area change
+                    print(f"[APPBAR EVENT] Ignoring ABN_POSCHANGED ({time_since_last_set:.2f}s after work area change)")
+                    return True, 0
+                
+                # Reaffirm our position when other appbars change (e.g., when an app docks)
+                screen_index = get_settings().get("screen_index", 0)
+                app = QtWidgets.QApplication.instance()
+                screens = app.screens()
+                if 0 <= screen_index < len(screens):
+                    screen = screens[screen_index]
+                else:
+                    screen = app.primaryScreen()
+                rect = screen.geometry()
+                
+                # Query our current AppBar position
+                shell32 = ctypes.windll.shell32
+                abd = APPBARDATA()
+                abd.cbSize = ctypes.sizeof(APPBARDATA)
+                abd.hWnd = int(self.winId())
+                abd.uCallbackMessage = msg_id
+                abd.uEdge = ABE_TOP
+                abd.rc.left = rect.left()
+                abd.rc.top = rect.top()
+                abd.rc.right = rect.right()
+                abd.rc.bottom = rect.top() + self.ticker_height
+                
+                # Query what Windows thinks our position should be
+                shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
+                print(f"[APPBAR EVENT] QUERYPOS result: top={abd.rc.top}, bottom={abd.rc.bottom}")
+                
+                # Reset to our desired position - always at the top
+                abd.rc.top = rect.top()
+                abd.rc.bottom = rect.top() + self.ticker_height
+                abd.rc.left = rect.left()
+                abd.rc.right = rect.right()
+                
+                # Reaffirm our position with SETPOS
+                shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
+                print(f"[APPBAR EVENT] SETPOS reaffirmed: top={abd.rc.top}, bottom={abd.rc.bottom}")
+                
+                # DON'T update work area here - it causes an infinite loop!
+                # The work area is already set during initial AppBar registration
+                # Updating it here triggers another ABN_POSCHANGED, creating a feedback loop
+                
+                # Force window position using SetWindowPos
+                HWND_TOPMOST = -1
+                SWP_NOACTIVATE = 0x0010
+                SWP_SHOWWINDOW = 0x0040
+                user32.SetWindowPos(int(self.winId()), HWND_TOPMOST, 
+                                  rect.left(), rect.top(), 
+                                  rect.width(), self.ticker_height, 
+                                  SWP_SHOWWINDOW | SWP_NOACTIVATE)
+                
+                print(f"[APPBAR EVENT] Window repositioned to top: y={rect.top()}")
+            
+            # ABN_FULLSCREENAPP (2) - Full screen app activated/deactivated
+            elif notification == ABN_FULLSCREENAPP:
+                fullscreen_active = msg.lParam
+                print(f"[APPBAR EVENT] ABN_FULLSCREENAPP - Fullscreen: {fullscreen_active}")
+                # When a fullscreen app activates, we might want to hide or show the ticker
+                # For now, we'll just maintain our position
+            
+            # ABN_WINDOWARRANGE (3) - User is rearranging windows
+            elif notification == ABN_WINDOWARRANGE:
+                arranging = msg.lParam
+                print(f"[APPBAR EVENT] ABN_WINDOWARRANGE - Arranging: {arranging}")
+                # Maintain position during window arrangement
+            
             return True, 0
+        
         return False, 0
 
 class ManageStocksDialog(QtWidgets.QDialog):
