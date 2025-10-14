@@ -2,7 +2,7 @@
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.10.14
-Version: 0.99.7 
+Version: 0.99.9
 License: GNU AGPLv3
 
 Description:
@@ -2811,6 +2811,7 @@ def parse_args():
     parser.add_argument("-ht", "--height", dest="ticker_height", type=int, help="Ticker height in pixels")
     parser.add_argument("-u", "--update-interval", dest="update_interval", type=int, help="Update interval in seconds")
     parser.add_argument("-b", "--backup-settings", action="store_true", help="Restore settings from backup and save as current")
+    
     return parser.parse_args()
 
 def restore_settings_from_backup():
@@ -2880,6 +2881,52 @@ def apply_command_line_settings(args):
             save_stocks([[t, f"{t}.png"] for t in tickers])
 
 def main():
+    # CRITICAL: Handle --help FIRST when running as windowed .exe
+    # This must happen before ANY other initialization
+    if (hasattr(sys, '_MEIPASS') or getattr(sys, 'frozen', False)):
+        if '-h' in sys.argv or '--help' in sys.argv:
+            if sys.platform == 'win32':
+                import ctypes
+                
+                # Show help in a message box (works perfectly for windowed .exe)
+                help_text = """TCKR Stock Ticker - Command Line Options
+
+Usage: TCKR [options]
+
+Options:
+  -h, --help
+      Show this help message
+
+  -a FINNHUB_API_KEY, --api FINNHUB_API_KEY
+      Set your Finnhub API key
+
+  -t TICKERS, --tickers TICKERS
+      Comma-separated list of stock tickers
+      Example: -t AAPL,MSFT,GOOGL
+
+  -s SPEED, --speed SPEED
+      Set ticker scroll speed (pixels per frame)
+
+  -ht TICKER_HEIGHT, --height TICKER_HEIGHT
+      Set ticker height in pixels
+
+  -u UPDATE_INTERVAL, --update-interval UPDATE_INTERVAL
+      Set price update interval in seconds
+
+  -b, --backup-settings
+      Restore settings from backup file
+
+Examples:
+  TCKR.exe -a your_api_key_here
+  TCKR.exe -t AAPL,MSFT,GOOGL -s 2
+  TCKR.exe -ht 60 -u 300"""
+                
+                # Show message box with help text
+                # MB_OK | MB_ICONINFORMATION = 0x00000040
+                ctypes.windll.user32.MessageBoxW(0, help_text, "TCKR Help", 0x00000040)
+                
+                sys.exit(0)
+    
     # Parse arguments FIRST before any Qt initialization
     args = parse_args()
     apply_command_line_settings(args)
