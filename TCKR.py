@@ -2,7 +2,7 @@
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.10.14
-Version: 0.99.9
+Version: 0.99.10
 License: GNU AGPLv3
 
 Description:
@@ -2676,43 +2676,52 @@ class TickerWindow(QtWidgets.QWidget):
                     screen = app.primaryScreen()
                 rect = screen.geometry()
                 
+                # CRITICAL: Get the actual physical window height for AppBar operations
+                # On high-DPI screens, Qt's logical pixels differ from Windows physical pixels
+                # We must use the physical height to maintain consistent space reservation
+                hwnd = int(self.winId())
+                actual_window_rect = wintypes.RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(actual_window_rect))
+                actual_window_height = actual_window_rect.bottom - actual_window_rect.top
+                print(f"[APPBAR EVENT] Window height: logical={self.ticker_height}px, physical={actual_window_height}px")
+                
                 # Query our current AppBar position
                 shell32 = ctypes.windll.shell32
                 abd = APPBARDATA()
                 abd.cbSize = ctypes.sizeof(APPBARDATA)
-                abd.hWnd = int(self.winId())
+                abd.hWnd = hwnd
                 abd.uCallbackMessage = msg_id
                 abd.uEdge = ABE_TOP
                 abd.rc.left = rect.left()
                 abd.rc.top = rect.top()
                 abd.rc.right = rect.right()
-                abd.rc.bottom = rect.top() + self.ticker_height
+                abd.rc.bottom = rect.top() + actual_window_height  # Use physical height
                 
                 # Query what Windows thinks our position should be
                 shell32.SHAppBarMessage(ABM_QUERYPOS, ctypes.byref(abd))
                 print(f"[APPBAR EVENT] QUERYPOS result: top={abd.rc.top}, bottom={abd.rc.bottom}")
                 
-                # Reset to our desired position - always at the top
+                # Reset to our desired position - always at the top with FULL physical height
                 abd.rc.top = rect.top()
-                abd.rc.bottom = rect.top() + self.ticker_height
+                abd.rc.bottom = rect.top() + actual_window_height  # Use physical height
                 abd.rc.left = rect.left()
                 abd.rc.right = rect.right()
                 
                 # Reaffirm our position with SETPOS
                 shell32.SHAppBarMessage(ABM_SETPOS, ctypes.byref(abd))
-                print(f"[APPBAR EVENT] SETPOS reaffirmed: top={abd.rc.top}, bottom={abd.rc.bottom}")
+                print(f"[APPBAR EVENT] SETPOS reaffirmed: top={abd.rc.top}, bottom={abd.rc.bottom}, height={actual_window_height}px")
                 
                 # DON'T update work area here - it causes an infinite loop!
                 # The work area is already set during initial AppBar registration
                 # Updating it here triggers another ABN_POSCHANGED, creating a feedback loop
                 
-                # Force window position using SetWindowPos
+                # Force window position using SetWindowPos with physical height
                 HWND_TOPMOST = -1
                 SWP_NOACTIVATE = 0x0010
                 SWP_SHOWWINDOW = 0x0040
-                user32.SetWindowPos(int(self.winId()), HWND_TOPMOST, 
+                user32.SetWindowPos(hwnd, HWND_TOPMOST, 
                                   rect.left(), rect.top(), 
-                                  rect.width(), self.ticker_height, 
+                                  rect.width(), actual_window_height,  # Use physical height
                                   SWP_SHOWWINDOW | SWP_NOACTIVATE)
                 
                 print(f"[APPBAR EVENT] Window repositioned to top: y={rect.top()}")
