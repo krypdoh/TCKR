@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.10.14
-Version: 0.99.10
+Date: 2025.10.15
+Version: 0.99.11
 License: GNU AGPLv3
 
 Description:
@@ -18,6 +18,7 @@ import os
 import json
 import requests
 import time
+import datetime
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtMultimedia import QSoundEffect
 import webbrowser
@@ -26,10 +27,15 @@ from ctypes import wintypes
 import concurrent.futures
 import argparse
 import shutil
+import signal
+import atexit
 
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "TCKR")
 SETTINGS_FILE = os.path.join(APPDATA_DIR, "TCKR.Settings.json")
 STOCKS_FILE = os.path.join(APPDATA_DIR, "TCKR.Tickers.json")
+
+# Global variable to track the main ticker window for emergency cleanup
+_global_ticker_window = None
 
 ABM_NEW = 0x00000000
 ABM_REMOVE = 0x00000001
@@ -277,46 +283,156 @@ def remove_appbar(hwnd):
     shell32 = ctypes.windll.shell32
     user32 = ctypes.windll.user32
     
+    print(f"[APPBAR] Removing AppBar registration for window handle {hwnd}")
+    
     abd = APPBARDATA()
     abd.cbSize = ctypes.sizeof(APPBARDATA)
     abd.hWnd = hwnd
     result = shell32.SHAppBarMessage(ABM_REMOVE, ctypes.byref(abd))
     print(f"[APPBAR] ABM_REMOVE result: {result}")
     
-    # CRITICAL: Restore work area after removing AppBar
-    # Get the screen dimensions to reset work area to full screen
+    # CRITICAL: Force Windows to recalculate work area after AppBar removal
     if sys.platform == "win32":
-        # Get primary monitor info
         from ctypes import wintypes
         
-        # Get the full screen rectangle
-        screen_width = user32.GetSystemMetrics(0)  # SM_CXSCREEN
-        screen_height = user32.GetSystemMetrics(1)  # SM_CYSCREEN
-        
-        # Reset work area to full screen (minus taskbar if present)
-        # Setting all zeros tells Windows to recalculate based on remaining AppBars
-        work_area = wintypes.RECT()
-        work_area.left = 0
-        work_area.top = 0
-        work_area.right = screen_width
-        work_area.bottom = screen_height
-        
-        # Let Windows recalculate the work area based on remaining AppBars (like taskbar)
+        # Method 1: Tell Windows to recalculate work area automatically
+        # This should handle remaining AppBars (like taskbar) correctly
         SPI_SETWORKAREA = 47
         SPIF_SENDCHANGE = 0x0002
-        user32.SystemParametersInfoW(SPI_SETWORKAREA, 0, 
-                                     ctypes.byref(work_area), 
-                                     SPIF_SENDCHANGE)
+        SPIF_UPDATEINIFILE = 0x0001
         
-        # Broadcast the change so all apps reposition
+        # Pass NULL to let Windows recalculate the work area based on remaining AppBars
+        result1 = user32.SystemParametersInfoW(SPI_SETWORKAREA, 0, None, 
+                                              SPIF_SENDCHANGE | SPIF_UPDATEINIFILE)
+        print(f"[APPBAR] SystemParametersInfo auto-recalculate result: {result1}")
+        
+        # Method 2: Force a complete desktop refresh
         HWND_BROADCAST = 0xFFFF
         WM_SETTINGCHANGE = 0x001A
         SMTO_ABORTIFHUNG = 0x0002
+        
+        # Broadcast work area change
         user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
                                   SPI_SETWORKAREA, 0,
-                                  SMTO_ABORTIFHUNG, 2000, None)
+                                  SMTO_ABORTIFHUNG, 3000, None)
         
-        print(f"[APPBAR] Work area restored and broadcast sent")
+        # Also broadcast display settings change to force a complete refresh
+        user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
+                                  0, ctypes.c_wchar_p("intl"),
+                                  SMTO_ABORTIFHUNG, 3000, None)
+        
+        # Give Windows time to process the changes
+        time.sleep(0.1)
+        
+        # Verify the work area was restored
+        work_area_after = wintypes.RECT()
+        user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_after), 0)  # SPI_GETWORKAREA = 48
+        print(f"[APPBAR] Work area after removal: top={work_area_after.top}, left={work_area_after.left}, right={work_area_after.right}, bottom={work_area_after.bottom}")
+        
+        print(f"[APPBAR] AppBar removal and work area restoration completed")
+
+def global_cleanup_handler():
+    """Global cleanup function for unexpected application termination"""
+    global _global_ticker_window
+    if _global_ticker_window and sys.platform == "win32":
+        try:
+            print("[EMERGENCY] Global cleanup handler activated - removing AppBar")
+            remove_appbar(int(_global_ticker_window.winId()))
+        except Exception as e:
+            print(f"[EMERGENCY] Global cleanup failed: {e}")
+
+def signal_handler(signum, frame):
+    """Handle system signals for graceful shutdown"""
+    print(f"[SIGNAL] Received signal {signum} - performing emergency cleanup")
+    global_cleanup_handler()
+    sys.exit(0)
+
+def is_market_open():
+    """
+    Check if the US stock market is currently open.
+    Returns True if market is open, False if closed.
+    
+    US Stock Market Hours (Eastern Time):
+    - Monday to Friday: 9:30 AM to 4:00 PM ET
+    - Closed on weekends and federal holidays
+    
+    Uses pandas_market_calendars for accurate market hours including holidays.
+    Falls back to simpler implementations if library is not available.
+    """
+    try:
+        # Method 1: Use pandas_market_calendars for most accurate market hours
+        import pandas_market_calendars as mcal
+        import pandas as pd
+        
+        # Get NYSE calendar (standard US stock market hours)
+        nyse = mcal.get_calendar('NYSE')
+        
+        # Get current time (pandas_market_calendars handles timezones internally)
+        now = pd.Timestamp.now(tz='America/New_York')
+        
+        # Get today's schedule
+        schedule = nyse.schedule(start_date=now.date(), end_date=now.date())
+        
+        # If no schedule for today, market is closed (weekend or holiday)
+        if schedule.empty:
+            return False
+        
+        # Get market open and close times for today
+        market_open_time = schedule.iloc[0]['market_open']
+        market_close_time = schedule.iloc[0]['market_close']
+        
+        # Check if current time is within market hours
+        return market_open_time <= now <= market_close_time
+    
+    except (ImportError, Exception):
+        # Method 2: Fall back to pytz-based implementation
+        try:
+            import pytz
+            
+            # Get current time in Eastern Time
+            eastern = pytz.timezone('US/Eastern')
+            now = datetime.datetime.now(eastern)
+            
+            # Check if it's a weekend
+            if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+                return False
+            
+            # Check if it's within market hours (9:30 AM to 4:00 PM ET)
+            market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+            market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+            
+            return market_open <= now <= market_close
+        
+        except (ImportError, Exception):
+            # Method 3: Fall back to simplified UTC check if pytz also not available
+            # This assumes Eastern Time is UTC-5 (standard) or UTC-4 (daylight)
+            utc_now = datetime.datetime.utcnow()
+            
+            # Approximate Eastern Time (this is not perfect due to DST)
+            # Using UTC-5 as approximation
+            eastern_approx = utc_now - datetime.timedelta(hours=5)
+            
+            # Check if it's a weekend
+            if eastern_approx.weekday() >= 5:
+                return False
+            
+            # Check if it's within approximate market hours
+            if 9 <= eastern_approx.hour < 16:
+                if eastern_approx.hour == 9 and eastern_approx.minute < 30:
+                    return False
+                return True
+            
+            return False
+
+def get_market_status_info():
+    """
+    Get market status information with appropriate colors.
+    Returns tuple: (market_text, market_color, status_text, status_color)
+    """
+    if is_market_open():
+        return ("Market:", QtGui.QColor("#00B3FF"), "Open", QtGui.QColor("#00FF40"))
+    else:
+        return ("Market:", QtGui.QColor("#00B3FF"), "Closed", QtGui.QColor("#FF5555"))
 
 def diagnose_appbar_state(hwnd, expected_height):
     """Diagnose the current AppBar state and work area to help troubleshoot reservation issues"""
@@ -869,7 +985,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.settings_action.triggered.connect(self.show_settings)
         self.stocks_action.triggered.connect(self.show_manage_stocks)
         self.about_action.triggered.connect(self.show_about)
-        self.exit_action.triggered.connect(QtWidgets.qApp.quit)
+        self.exit_action.triggered.connect(self.safe_exit)
         self.activated.connect(self.on_activated)
 
     def show_settings(self):
@@ -941,6 +1057,27 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         msg.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
         msg.exec_()
 
+    def safe_exit(self):
+        """Safely exit the application with proper AppBar cleanup"""
+        print("[EXIT] Safe exit initiated - cleaning up AppBar registration")
+        
+        # Ensure the ticker window closes properly, which triggers AppBar cleanup
+        if hasattr(self, 'ticker_window') and self.ticker_window:
+            # Close the ticker window, which will call closeEvent and clean up AppBar
+            self.ticker_window.close()
+            
+            # Give Windows a moment to process the AppBar removal
+            # Use a timer to delay the actual quit to ensure cleanup completes
+            QtCore.QTimer.singleShot(100, self.delayed_quit)
+        else:
+            # No ticker window, just quit directly
+            QtWidgets.qApp.quit()
+    
+    def delayed_quit(self):
+        """Complete the application exit after AppBar cleanup"""
+        print("[EXIT] AppBar cleanup completed, exiting application")
+        QtWidgets.qApp.quit()
+
     def on_activated(self, reason):
         if reason == QtWidgets.QSystemTrayIcon.Trigger:
             self.ticker_window.showNormal()
@@ -998,6 +1135,11 @@ class TickerWindow(QtWidgets.QWidget):
         self.update_timer = QtCore.QTimer(self)
         self.update_timer.timeout.connect(self.update_prices_inplace)
         self.update_timer.start(self.update_interval)
+        
+        # Market status update timer - check every minute for market open/close changes
+        self.market_status_timer = QtCore.QTimer(self)
+        self.market_status_timer.timeout.connect(self.update_market_status)
+        self.market_status_timer.start(60000)  # Check every 60 seconds
         
         # DISABLED: Glow cleanup timer was causing scroll stuttering every second
         # Glow effects will now persist until next price update (every 5 minutes)
@@ -2012,6 +2154,13 @@ class TickerWindow(QtWidgets.QWidget):
         self.stocks = sorted([s[0] for s in load_stocks()])
         self.prices = fetch_all_stock_prices(self.stocks, api_key, api_key_2)
         self.build_ticker_text(reset_scroll=True)
+    
+    def update_market_status(self):
+        """Update market status in the ticker display"""
+        # Only rebuild ticker pixmaps to update market status
+        # This is more efficient than rebuilding the entire ticker text
+        self.build_ticker_pixmaps()
+    
     def build_ticker_text(self, reset_scroll=False):
         items = []
         
@@ -2070,6 +2219,40 @@ class TickerWindow(QtWidgets.QWidget):
         small_font = QtGui.QFont(self.ticker_font)
         small_font.setPointSize(max(8, int(self.ticker_font.pointSize() * 0.5)))
         small_metrics = QtGui.QFontMetrics(small_font)
+        
+        # Create market status pixmap first
+        market_text, market_color, status_text, status_color = get_market_status_info()
+        market_full_text = f"{market_text} {status_text}"
+        market_text_width = metrics.horizontalAdvance(market_text + " ")
+        status_text_width = metrics.horizontalAdvance(status_text)
+        sep = "      "
+        sep_width = metrics.horizontalAdvance(sep)
+        market_total_width = market_text_width + status_text_width + sep_width + 20
+        
+        market_pixmap = QtGui.QPixmap(market_total_width, self.ticker_height)
+        market_pixmap.fill(QtCore.Qt.transparent)
+        market_painter = QtGui.QPainter(market_pixmap)
+        market_painter.setFont(self.ticker_font)
+        
+        # Center text vertically
+        text_y = (self.ticker_height + metrics.ascent() - metrics.descent()) // 2
+        x = 10  # Small left padding
+        
+        # Draw "Market:" in blue with glow
+        self.draw_text_with_global_glow(market_painter, x, text_y, market_text, market_color)
+        x += market_text_width
+        
+        # Draw "Open" or "Closed" with appropriate color and glow
+        self.draw_text_with_global_glow(market_painter, x, text_y, status_text, status_color)
+        
+        market_painter.end()
+        
+        # Add market status pixmap to the beginning
+        self.ticker_pixmaps.append(market_pixmap)
+        self.ticker_pixmap_widths.append(market_total_width)
+        self.ticker_area_templates.append([])  # No click areas for market status
+        
+        # Now build stock ticker pixmaps
         for tkr in self.stocks:
             price, prev = self.prices.get(tkr, (None, None))
             icon = get_ticker_icon(tkr, icon_size)
@@ -2601,6 +2784,8 @@ class TickerWindow(QtWidgets.QWidget):
             self.timer.stop()
         if hasattr(self, 'update_timer') and self.update_timer.isActive():
             self.update_timer.stop()
+        if hasattr(self, 'market_status_timer') and self.market_status_timer.isActive():
+            self.market_status_timer.stop()
         if hasattr(self, 'position_check_timer') and self.position_check_timer.isActive():
             self.position_check_timer.stop()
         
@@ -2952,11 +3137,36 @@ Examples:
     icon_path = resource_path("TCKR.ico")
     app.setWindowIcon(QtGui.QIcon(icon_path)) # <-- Add this line
     app.setQuitOnLastWindowClosed(False)
+    
+    # Register global cleanup handlers for emergency situations
+    if sys.platform == "win32":
+        atexit.register(global_cleanup_handler)
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+    
     ticker_window = TickerWindow()
+    
+    # Set global reference for emergency cleanup
+    global _global_ticker_window
+    _global_ticker_window = ticker_window
+    
     ticker_window.set_transparency(get_settings().get("transparency", 100))
     tray = TrayIcon(app, ticker_window)
     ticker_window.tray_icon = tray
     tray.show()
+    
+    # Add application exit handler for additional safety
+    def emergency_cleanup():
+        """Emergency cleanup function called when application is about to exit"""
+        print("[EXIT] Emergency cleanup - ensuring AppBar is removed")
+        if sys.platform == "win32" and hasattr(ticker_window, 'winId'):
+            try:
+                remove_appbar(int(ticker_window.winId()))
+            except Exception as e:
+                print(f"[EXIT] Emergency cleanup failed: {e}")
+    
+    app.aboutToQuit.connect(emergency_cleanup)
+    
     sys.exit(app.exec_())
 
 if __name__ == "__main__":
