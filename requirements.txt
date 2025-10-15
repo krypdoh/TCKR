@@ -1,8 +1,27 @@
-  # Core GUI Framework
-  PyQt5>=5.15.0
+# TCKR Stock Ticker Application Requirements
+# Author: Paul R. Charovkine
+# Version: 0.99.11
 
-  # HTTP Requests for API calls (Finnhub, stock data)
-  requests>=2.28.0
+# Core GUI Framework
+PyQt5>=5.15.0
 
-  # Note: The following are built-in Python modules and don't need to be installed:
-  # - sys, os, json, time, webbrowser, ctypes, concurrent.futures, argparse, shutil
+# HTTP Requests for API calls (Finnhub, stock data)
+requests>=2.28.0
+
+# Market Hours and Calendar (for accurate trading hours including holidays)
+pandas_market_calendars>=5.0.0
+
+# Note: pandas_market_calendars automatically installs:
+# - pandas>=1.1
+# - pytz>=2020.1
+# - exchange_calendars>=3.3
+# - python-dateutil
+# - tzdata
+
+# Note: The following are built-in Python modules and don't need to be installed:
+# - sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures
+# - argparse, shutil, signal, atexit
+
+# Optional: For development and packaging
+# pyinstaller>=5.0  # For creating executable
+# setuptools>=65.0  # For setup.py if needed
