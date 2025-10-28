@@ -1,4 +1,4 @@
-"""
+﻿"""
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.10.20
@@ -34,16 +34,14 @@ import atexit
 try:
     import ticker_utils_numba as opt
     USE_OPT = True
-    print("[PERF] Numba JIT optimizations enabled (5-8x faster calculations)")
 except ImportError:
     USE_OPT = False
-    print("[PERF] Using pure Python (install numba for 5-8x speedup: pip install numba)")
+    print("[PERF] Numba file not found. Using pure Python (place ticker_utils_numba.py in the same directory)")
 
 # Memory optimization using pixmap pooling
 try:
     from memory_pool import get_pooled_pixmap, return_pooled_pixmap, managed_pixmap, get_pool_stats
     USE_MEMORY_POOL = True
-    print("[PERF] Memory pool optimization enabled (reduced GC overhead)")
 except ImportError:
     USE_MEMORY_POOL = False
     print("[PERF] Memory pool not available (place memory_pool.py in same directory)")
@@ -614,12 +612,12 @@ def fetch_finnhub_quote(ticker, api_key):
     if settings.get("use_cert") and settings.get("cert_file"):
         verify = settings["cert_file"]
     try:
-        # print(f"[API CALL] GET {url}")  # Commented for less verbose output
+        print(f"[API CALL] GET {url}")
         response = requests.get(url, timeout=10, proxies=proxies, verify=verify)
-        # print(f"[API RESPONSE] Status: {response.status_code}")  # Commented for less verbose output
+        print(f"[API RESPONSE] {ticker}: Status {response.status_code}")
         response.raise_for_status()
         data = response.json()
-        # print(f"[API DATA] {ticker}: {data}")  # Commented for less verbose output
+        print(f"[API DATA] {ticker}: price={data.get('c')}, prev_close={data.get('pc')}")
         price = data.get("c")
         prev_close = data.get("pc")
         return ticker, (price, prev_close)
@@ -636,6 +634,8 @@ def fetch_all_stock_prices(tickers, api_key, api_key_2=None):
     batch_size = 10
     call_count = 0
     
+    print(f"[API] Starting to fetch prices for {len(tickers)} tickers")
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         for i in range(0, len(tickers), batch_size):
             batch = tickers[i:i+batch_size]
@@ -644,12 +644,13 @@ def fetch_all_stock_prices(tickers, api_key, api_key_2=None):
             # Switch to second key after 30 calls (3 batches of 10)
             if api_key_2 and call_count >= 30:
                 current_key = api_key_2
-                # print(f"[API KEY] Using API Key 2 for batch {i//batch_size + 1}")  # Commented for less verbose output
+                print(f"[API KEY] Using API Key 2 for batch {i//batch_size + 1}")
             else:
                 current_key = api_key
-                # if api_key_2:  # Commented for less verbose output
-                #     print(f"[API KEY] Using API Key 1 for batch {i//batch_size + 1}")
+                if api_key_2:
+                    print(f"[API KEY] Using API Key 1 for batch {i//batch_size + 1}")
             
+            print(f"[API] Fetching batch {i//batch_size + 1}: {batch}")
             futures = [executor.submit(fetch_finnhub_quote, ticker, current_key) for ticker in batch]
             for future in concurrent.futures.as_completed(futures):
                 tkr, (price, prev_close) = future.result()
@@ -661,7 +662,10 @@ def fetch_all_stock_prices(tickers, api_key, api_key_2=None):
                     call_count = 0
                     
             if i + batch_size < len(tickers):
+                print(f"[API] Waiting 3.5 seconds before next batch...")
                 time.sleep(3.5)  # Wait 3.5 seconds between batches
+    
+    print(f"[API] Completed fetching {len(prices)} prices")
     return prices
 
 def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
@@ -673,6 +677,8 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
     batch_size = 10
     had_429 = False
     call_count = 0
+    
+    print(f"[API] Starting to fetch prices (with 429 detection) for {len(tickers)} tickers")
     
     def fetch_with_status(ticker, api_key):
         url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={api_key}"
@@ -687,12 +693,12 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
         if settings.get("use_cert") and settings.get("cert_file"):
             verify = settings["cert_file"]
         try:
-            # print(f"[API CALL] GET {url}")  # Commented for less verbose output
+            print(f"[API CALL] GET {url}")
             response = requests.get(url, timeout=10, proxies=proxies, verify=verify)
-            # print(f"[API RESPONSE] Status: {response.status_code}")  # Commented for less verbose output
+            print(f"[API RESPONSE] {ticker}: Status {response.status_code}")
             response.raise_for_status()
             data = response.json()
-            # print(f"[API DATA] {ticker}: {data}")  # Commented for less verbose output
+            print(f"[API DATA] {ticker}: price={data.get('c')}, prev_close={data.get('pc')}")
             price = data.get("c")
             prev_close = data.get("pc")
             return ticker, (price, prev_close), response.status_code
@@ -712,18 +718,20 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
             # Switch to second key after 30 calls (3 batches of 10)
             if api_key_2 and call_count >= 30:
                 current_key = api_key_2
-                # print(f"[API KEY] Using API Key 2 for batch {i//batch_size + 1}")  # Commented for less verbose output
+                print(f"[API KEY] Using API Key 2 for batch {i//batch_size + 1}")
             else:
                 current_key = api_key
-                # if api_key_2:  # Commented for less verbose output
-                #     print(f"[API KEY] Using API Key 1 for batch {i//batch_size + 1}")
+                if api_key_2:
+                    print(f"[API KEY] Using API Key 1 for batch {i//batch_size + 1}")
             
+            print(f"[API] Fetching batch {i//batch_size + 1}: {batch}")
             futures = [executor.submit(fetch_with_status, ticker, current_key) for ticker in batch]
             for future in concurrent.futures.as_completed(futures):
                 tkr, (price, prev_close), status_code = future.result()
                 prices[tkr] = (price, prev_close)
                 if status_code == 429:
                     had_429 = True
+                    print(f"[API WARNING] Received 429 (rate limit) for {tkr}")
                 call_count += 1
                 
                 # Reset counter after 60 calls to alternate back to first key
@@ -731,7 +739,10 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
                     call_count = 0
                     
             if i + batch_size < len(tickers):
+                print(f"[API] Waiting 3.5 seconds before next batch...")
                 time.sleep(3.5)
+    
+    print(f"[API] Completed fetching {len(prices)} prices (429 detected: {had_429})")
     return prices, had_429
 
 def get_ticker_icon(ticker, size=32):
@@ -1001,7 +1012,9 @@ class PriceFetchWorker(QtCore.QThread):
         self.api_key = api_key
         self.api_key_2 = api_key_2
     def run(self):
+        print(f"[WORKER] PriceFetchWorker thread started")
         prices = fetch_all_stock_prices(self.tickers, self.api_key, self.api_key_2)
+        print(f"[WORKER] PriceFetchWorker emitting prices signal")
         self.prices_fetched.emit(prices)
 
 class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidget
@@ -1076,6 +1089,9 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.effects_action = menu.addAction("Use Visual Effects (Bloom/Glow/Glass)")
         self.effects_action.setCheckable(True)
         self.effects_action.setChecked(True)  # Enabled by default
+        self.fps_overlay_action = menu.addAction("Show FPS Overlay")
+        self.fps_overlay_action.setCheckable(True)
+        self.fps_overlay_action.setChecked(False)  # Disabled by default
         menu.addSeparator()
         self.about_action = menu.addAction("About...")
         menu.addSeparator()
@@ -1085,9 +1101,24 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.settings_action.triggered.connect(self.show_settings)
         self.stocks_action.triggered.connect(self.show_manage_stocks)
         self.effects_action.triggered.connect(self.toggle_effects)
+        self.fps_overlay_action.triggered.connect(self.toggle_fps_overlay)
         self.about_action.triggered.connect(self.show_about)
         self.exit_action.triggered.connect(self.safe_exit)
         self.activated.connect(self.on_activated)
+
+    def toggle_fps_overlay(self):
+        """Toggle FPS overlay on/off"""
+        if hasattr(self.ticker_window, 'show_fps_overlay'):
+            # Toggle the overlay
+            current_state = self.ticker_window.show_fps_overlay
+            self.ticker_window.show_fps_overlay = not current_state
+            
+            # Update the menu item checkmark
+            self.fps_overlay_action.setChecked(not current_state)
+            
+            # Print status
+            status = "enabled" if not current_state else "disabled"
+            print(f"[FPS OVERLAY] FPS overlay {status}")
 
     def toggle_effects(self):
         """Toggle visual effects on/off"""
@@ -1155,7 +1186,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
     def show_about(self):
         about_html = (
             "<b>TCKR</b><br>"
-            "Version 0.99<br><br>"
+            "Version 1.0<br><br>"
             "A simple and powerful scrolling LED stock ticker application.<br><br>"
             "© 2025 Paul R. Charovkine. All rights reserved.<br>"
             "Licensed under the AGPL-3.0 license.<br><br>"
@@ -1393,6 +1424,9 @@ class TickerWindow(QtWidgets.QWidget):
         # Show "TCKR: Loading" until first API batch completes
         self.loading = True
         
+        # FPS overlay toggle (disabled by default)
+        self.show_fps_overlay = False
+        
         self.sound_effect = QSoundEffect()
         self.sound_effect.setVolume(0.5)
         self.set_sound_file()
@@ -1557,7 +1591,7 @@ class TickerWindow(QtWidgets.QWidget):
             print(f"[INIT] Window position after show(): x={pos.x()}, y={pos.y()}")
             print(f"[INIT] Window geometry after show(): x={geom.x()}, y={geom.y()}, width={geom.width()}, height={geom.height()}")
             
-            print("[TCKR] Initialized - Starting price updates")  # Single startup message
+            print("[TCKR] Initialized")  # Single startup message
             
             # Setup AppBar after showing - this allows coordinate_with_other_tickers to find existing windows
             QtCore.QTimer.singleShot(100, self.setup_appbar_and_position)
@@ -1572,8 +1606,15 @@ class TickerWindow(QtWidgets.QWidget):
             # On non-Windows platforms, show immediately
             self.show()
         
-        # Start fetching real prices in the background AFTER showing the ticker
-        QtCore.QTimer.singleShot(500, self.update_prices_full)
+        # Force at least one render to display "TCKR: Loading" before starting API calls
+        print("[TCKR] Displaying loading screen...")
+        QtWidgets.QApplication.processEvents()  # Process pending events to ensure window is rendered
+        self.gl_widget.update()  # Trigger immediate paint
+        QtWidgets.QApplication.processEvents()  # Process the paint event
+        
+        # Start fetching real prices in the background AFTER loading screen is displayed
+        print("[TCKR] Starting price updates...")
+        QtCore.QTimer.singleShot(100, self.update_prices_full)
         self.failed_fetch_counts = {}
         
 
@@ -2194,20 +2235,27 @@ class TickerWindow(QtWidgets.QWidget):
             self.ticker_font = QtGui.QFont("Arial", font_size)
     def update_prices_full(self):
         # Keep loading screen visible while fetching first batch
+        print("[TCKR] update_prices_full() called - preparing to fetch stock prices")
         api_key = ensure_finnhub_api_key(self)
         if not api_key:
+            print("[TCKR] No API key available, canceling price fetch")
             self.loading = False
             self.gl_widget.update()
             return
         # Get second API key if configured
         api_key_2 = get_settings().get("finnhub_api_key_2", "").strip() or None
+        if api_key_2:
+            print("[TCKR] Using dual API keys for load balancing")
+        print("[TCKR] Starting worker thread to fetch prices...")
         self.worker = PriceFetchWorker(sorted([s[0] for s in load_stocks()]), api_key, api_key_2)
         self.worker.prices_fetched.connect(self.on_prices_fetched)
         self.worker.start()
     def on_prices_fetched(self, prices):
+        print(f"[TCKR] on_prices_fetched() called - received {len(prices)} prices")
         self.stocks = sorted([s[0] for s in load_stocks()])
         self.prices = prices
         self.loading = False  # Hide loading screen, show ticker with real data
+        print("[TCKR] Loading complete - building ticker display")
         self.build_ticker_text(reset_scroll=True)
 
     def cleanup_expired_glow_effects(self):
@@ -3185,12 +3233,14 @@ class TickerWindow(QtWidgets.QWidget):
             if hasattr(self, 'ticker_pixmaps') and hasattr(self, 'ticker_pixmap_widths'):
                 for pixmap, w in zip(self.ticker_pixmaps, self.ticker_pixmap_widths):
                     if pixmap and not pixmap.isNull() and draw_x + w > 0 and draw_x < width:
-                        painter.drawPixmap(draw_x, 0, pixmap)
+                        # Convert float to int for drawPixmap (sub-pixel scrolling uses floats)
+                        painter.drawPixmap(int(draw_x), 0, pixmap)
                     draw_x += w
             # Then draw donate message at the end (if this cycle includes it)
             if is_donate and hasattr(self, '_donate_pixmap') and self._donate_pixmap and not self._donate_pixmap.isNull():
                 if draw_x + self._donate_pixmap.width() > 0 and draw_x < width:
-                    painter.drawPixmap(draw_x, 0, self._donate_pixmap)
+                    # Convert float to int for drawPixmap
+                    painter.drawPixmap(int(draw_x), 0, self._donate_pixmap)
         
         # Reset opacity
         painter.setOpacity(1.0)
@@ -3328,6 +3378,8 @@ class TickerWindow(QtWidgets.QWidget):
         if not hasattr(self, '_fps_counter'):
             self._fps_counter = 0
             self._fps_last_print = 0
+            self._current_fps = 0.0
+            self._current_frame_time = 0.0
         self._fps_counter += 1
         
         self.ticker_click_areas = []
@@ -3405,18 +3457,20 @@ class TickerWindow(QtWidgets.QWidget):
                 draw_x = x
                 # Draw stock tickers first
                 for pixmap, w, area_tpls in zip(self.ticker_pixmaps, self.ticker_pixmap_widths, self.ticker_area_templates):
-                    painter.drawPixmap(draw_x, 0, pixmap)
+                    # Convert float to int for drawPixmap (sub-pixel scrolling uses floats)
+                    painter.drawPixmap(int(draw_x), 0, pixmap)
                     for area_type, tkr, rect in area_tpls:
                         offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(draw_x, 0)
+                        offset_rect.translate(int(draw_x), 0)
                         self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += w
                 # Then draw donate message at the end (if this cycle includes it)
                 if is_donate:
-                    painter.drawPixmap(draw_x, 0, self._donate_pixmap)
+                    # Convert float to int for drawPixmap
+                    painter.drawPixmap(int(draw_x), 0, self._donate_pixmap)
                     for area_type, tkr, rect in self._donate_area_template:
                         offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(draw_x, 0)
+                        offset_rect.translate(int(draw_x), 0)
                         self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += self._donate_pixmap_width
         else:
@@ -3425,18 +3479,20 @@ class TickerWindow(QtWidgets.QWidget):
                 draw_x = x
                 # Draw stock tickers first
                 for pixmap, w, area_tpls in zip(self.ticker_pixmaps, self.ticker_pixmap_widths, self.ticker_area_templates):
-                    painter.drawPixmap(draw_x, 0, pixmap)
+                    # Convert float to int for drawPixmap (sub-pixel scrolling uses floats)
+                    painter.drawPixmap(int(draw_x), 0, pixmap)
                     for area_type, tkr, rect in area_tpls:
                         offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(draw_x, 0)
+                        offset_rect.translate(int(draw_x), 0)
                         self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += w
                 # Then draw donate message at the end (if this cycle includes it)
                 if is_donate:
-                    painter.drawPixmap(draw_x, 0, self._donate_pixmap)
+                    # Convert float to int for drawPixmap
+                    painter.drawPixmap(int(draw_x), 0, self._donate_pixmap)
                     for area_type, tkr, rect in self._donate_area_template:
                         offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(draw_x, 0)
+                        offset_rect.translate(int(draw_x), 0)
                         self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += self._donate_pixmap_width
 
@@ -3471,12 +3527,19 @@ class TickerWindow(QtWidgets.QWidget):
             else:
                 print(f"[STUTTER] Frame took {delta_time*1000:.1f}ms")
         
-        # FPS counter - print every 60 frames
+        # FPS counter - calculate every 60 frames
         if hasattr(self, '_fps_counter') and self._fps_counter % 60 == 0:
             elapsed = current_time - self._fps_last_print
             if elapsed > 0 and self._fps_last_print > 0:
                 fps = 60 / elapsed
-                print(f"[FPS] Current: {fps:.1f} FPS | Frame time: {(elapsed/60)*1000:.1f}ms avg")
+                
+                # Store FPS values for overlay display
+                self._current_fps = fps
+                self._current_frame_time = (elapsed/60)*1000
+                
+                # Only print to console if overlay is disabled
+                if not self.show_fps_overlay:
+                    print(f"[FPS] Current: {fps:.1f} FPS | Frame time: {(elapsed/60)*1000:.1f}ms avg")
                 
                 # Initialize adaptive quality state
                 if not hasattr(self, '_effects_disabled'):
@@ -3487,7 +3550,8 @@ class TickerWindow(QtWidgets.QWidget):
                 # Require SUSTAINED high FPS (3+ seconds at 59+ FPS) before re-enabling
                 if fps < 55:
                     if not self._effects_disabled:
-                        print(f"[ADAPTIVE] FPS dropped to {fps:.1f} - disabling visual effects for smooth scrolling")
+                        if not self.show_fps_overlay:
+                            print(f"[ADAPTIVE] FPS dropped to {fps:.1f} - disabling visual effects for smooth scrolling")
                         self._effects_disabled = True
                     self._high_fps_streak = 0  # Reset streak counter
                 elif fps >= 59:
@@ -3495,7 +3559,8 @@ class TickerWindow(QtWidgets.QWidget):
                     self._high_fps_streak += 1
                     if self._effects_disabled and self._high_fps_streak >= 3:
                         # Sustained 3+ seconds of 59+ FPS - safe to re-enable effects
-                        print(f"[ADAPTIVE] FPS sustained at {fps:.1f} for {self._high_fps_streak}s - re-enabling visual effects")
+                        if not self.show_fps_overlay:
+                            print(f"[ADAPTIVE] FPS sustained at {fps:.1f} for {self._high_fps_streak}s - re-enabling visual effects")
                         self._effects_disabled = False
                         self._high_fps_streak = 0
                 else:
@@ -3532,15 +3597,68 @@ class TickerWindow(QtWidgets.QWidget):
                     self.offset += supercycle_width
         
         # Apply visual effects if enabled (user can toggle with Effects button)
+        # Check if any effects are actually enabled to avoid unnecessary function calls and settings lookups
         if self.gl_widget and self.gl_widget.effects_enabled:
-            # Apply bloom/glow effect (light bleeding from bright LEDs)
-            self.apply_bloom_effect(painter, width, height)
+            settings = get_settings()  # Get settings once instead of in each function
+            bloom_enabled = settings.get("led_bloom_effect", True)
+            ghosting_enabled = settings.get("led_ghosting_effect", True)
+            glass_enabled = settings.get("led_glass_glare", True)
             
-            # Apply ghosting effect on top of everything (creates glow effect)
-            self.apply_ghosting_effect(painter, width, height)
+            # Only call effect functions if their individual settings are enabled
+            if bloom_enabled:
+                # Apply bloom/glow effect (light bleeding from bright LEDs)
+                self.apply_bloom_effect(painter, width, height)
             
-            # Apply glass cover with reflections/glare (final layer on top of everything)
-            self.apply_glass_glare_effect(painter, width, height)
+            if ghosting_enabled:
+                # Apply ghosting effect on top of everything (creates glow effect)
+                self.apply_ghosting_effect(painter, width, height)
+            
+            if glass_enabled:
+                # Apply glass cover with reflections/glare (final layer on top of everything)
+                self.apply_glass_glare_effect(painter, width, height)
+        
+        # Draw FPS overlay if enabled
+        if self.show_fps_overlay and hasattr(self, '_current_fps'):
+            # Draw semi-transparent background for readability
+            overlay_height = 35
+            overlay_width = 110  # Reduced from 200 to fit content better
+            overlay_x = width - overlay_width  # Aligned to right edge (no margin)
+            overlay_y = 0  # Aligned to top edge (no margin)
+            
+            # Dark background with transparency
+            bg_color = QtGui.QColor(0, 0, 0, 180)
+            painter.fillRect(overlay_x, overlay_y, overlay_width, overlay_height, bg_color)
+            
+            # Border for visual separation
+            border_color = QtGui.QColor(0, 179, 255, 200)
+            painter.setPen(QtGui.QPen(border_color, 1))
+            painter.drawRect(overlay_x, overlay_y, overlay_width, overlay_height)
+            
+            # FPS text with color coding
+            fps_value = self._current_fps
+            if fps_value >= 59:
+                fps_color = QtGui.QColor(0, 255, 64)  # Green for good FPS
+            elif fps_value >= 30:
+                fps_color = QtGui.QColor(255, 215, 0)  # Yellow/gold for medium FPS
+            else:
+                fps_color = QtGui.QColor(255, 85, 85)  # Red for low FPS
+            
+            # Create smaller font for overlay
+            overlay_font = QtGui.QFont("Consolas", 9)
+            overlay_font.setBold(True)
+            painter.setFont(overlay_font)
+            painter.setPen(fps_color)
+            
+            # Draw FPS value
+            fps_text = f"FPS: {fps_value:.1f}"
+            painter.drawText(overlay_x + 10, overlay_y + 15, fps_text)
+            
+            # Draw frame time in smaller, dimmer text
+            frame_time_text = f"Frame: {self._current_frame_time:.2f}ms"
+            painter.setPen(QtGui.QColor(160, 160, 160))
+            overlay_font.setPointSize(7)
+            painter.setFont(overlay_font)
+            painter.drawText(overlay_x + 10, overlay_y + 28, frame_time_text)
         
         painter.end()
     def ticker_mousePressEvent(self, event):
