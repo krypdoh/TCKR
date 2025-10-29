@@ -1,6 +1,6 @@
 # TCKR Stock Ticker Application Requirements
 # Author: Paul R. Charovkine
-# Version: 0.99.11
+# Version: 1.0
 
 # Core GUI Framework
 PyQt5>=5.15.0
@@ -25,3 +25,4 @@ pandas_market_calendars>=5.0.0
 # Optional: For development and packaging
 # pyinstaller>=5.0  # For creating executable
 # setuptools>=65.0  # For setup.py if needed
+
