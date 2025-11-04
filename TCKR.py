@@ -1,8 +1,8 @@
-﻿"""
+"""
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.10.20
-Version: 1.0 alpha
+Date: 2025.11.04
+Version: 1.0.0.202411041201 alpha
 License: GNU AGPLv3
 
 Description:
@@ -629,10 +629,13 @@ def fetch_all_stock_prices(tickers, api_key, api_key_2=None):
     """
     Fetch stock prices using one or two API keys.
     If api_key_2 is provided, alternates between keys every 30 calls.
+    Uses adaptive delay that starts at 1s and increases if errors occur.
     """
     prices = {}
     batch_size = 10
     call_count = 0
+    batch_delay = 1.0  # Start with 1 second delay
+    consecutive_errors = 0
     
     print(f"[API] Starting to fetch prices for {len(tickers)} tickers")
     
@@ -652,18 +655,32 @@ def fetch_all_stock_prices(tickers, api_key, api_key_2=None):
             
             print(f"[API] Fetching batch {i//batch_size + 1}: {batch}")
             futures = [executor.submit(fetch_finnhub_quote, ticker, current_key) for ticker in batch]
+            batch_had_error = False
             for future in concurrent.futures.as_completed(futures):
                 tkr, (price, prev_close) = future.result()
+                if price is None:
+                    batch_had_error = True
                 prices[tkr] = (price, prev_close)
                 call_count += 1
                 
                 # Reset counter after 60 calls to alternate back to first key
                 if call_count >= 60:
                     call_count = 0
+            
+            # Adaptive delay adjustment
+            if batch_had_error:
+                consecutive_errors += 1
+                if consecutive_errors >= 2 and batch_delay < 5.0:
+                    batch_delay = min(batch_delay + 0.5, 5.0)  # Increase delay, cap at 5s
+                    print(f"[API] Errors detected, increasing delay to {batch_delay:.1f}s")
+            else:
+                if consecutive_errors > 0:
+                    print(f"[API] No errors in this batch, keeping delay at {batch_delay:.1f}s")
+                consecutive_errors = 0
                     
             if i + batch_size < len(tickers):
-                print(f"[API] Waiting 3.5 seconds before next batch...")
-                time.sleep(3.5)  # Wait 3.5 seconds between batches
+                print(f"[API] Waiting {batch_delay:.1f} seconds before next batch...")
+                time.sleep(batch_delay)
     
     print(f"[API] Completed fetching {len(prices)} prices")
     return prices
@@ -672,11 +689,14 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
     """
     Fetch stock prices with 429 detection using one or two API keys.
     If api_key_2 is provided, alternates between keys every 30 calls.
+    Uses adaptive delay that starts at 1s and increases on 429 errors.
     """
     prices = {}
     batch_size = 10
     had_429 = False
     call_count = 0
+    batch_delay = 1.0  # Start with 1 second delay
+    consecutive_429s = 0
     
     print(f"[API] Starting to fetch prices (with 429 detection) for {len(tickers)} tickers")
     
@@ -726,21 +746,34 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
             
             print(f"[API] Fetching batch {i//batch_size + 1}: {batch}")
             futures = [executor.submit(fetch_with_status, ticker, current_key) for ticker in batch]
+            batch_had_429 = False
             for future in concurrent.futures.as_completed(futures):
                 tkr, (price, prev_close), status_code = future.result()
                 prices[tkr] = (price, prev_close)
                 if status_code == 429:
                     had_429 = True
+                    batch_had_429 = True
                     print(f"[API WARNING] Received 429 (rate limit) for {tkr}")
                 call_count += 1
                 
                 # Reset counter after 60 calls to alternate back to first key
                 if call_count >= 60:
                     call_count = 0
+            
+            # Adaptive delay adjustment based on 429 errors
+            if batch_had_429:
+                consecutive_429s += 1
+                if batch_delay < 10.0:
+                    batch_delay = min(batch_delay + 1.0, 10.0)  # Increase delay by 1s, cap at 10s
+                    print(f"[API] 429 detected, increasing delay to {batch_delay:.1f}s")
+            else:
+                if consecutive_429s > 0:
+                    print(f"[API] No 429 in this batch, keeping delay at {batch_delay:.1f}s")
+                consecutive_429s = 0
                     
             if i + batch_size < len(tickers):
-                print(f"[API] Waiting 3.5 seconds before next batch...")
-                time.sleep(3.5)
+                print(f"[API] Waiting {batch_delay:.1f} seconds before next batch...")
+                time.sleep(batch_delay)
     
     print(f"[API] Completed fetching {len(prices)} prices (429 detected: {had_429})")
     return prices, had_429
@@ -1022,12 +1055,20 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         super().__init__(parent)
         self.ticker_window = parent
         self.setMouseTracking(True)
-        # Enable continuous rendering for smooth animation independent of QTimer
+        # Enable continuous rendering for smooth animation - let VSync handle frame pacing
+        # This is simpler and more reliable than trying to time frames ourselves
         self.continuous_rendering = True
         
         # Enable double buffering for smooth rendering
         self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent)
         self.setAttribute(QtCore.Qt.WA_NoSystemBackground)
+        self.setAttribute(QtCore.Qt.WA_PaintOnScreen, False)  # Use double buffer, not direct painting
+        self.setAttribute(QtCore.Qt.WA_NativeWindow, False)   # Prevent native window creation overhead
+        self.setAttribute(QtCore.Qt.WA_DontCreateNativeAncestors, True)  # Optimize rendering
+        
+        # Set update behavior for immediate, non-synced updates
+        self.setAttribute(QtCore.Qt.WA_UpdatesDisabled, False)
+        self.setUpdatesEnabled(True)
         
         # Visual effects toggle (enabled by default, user can toggle with button)
         self.effects_enabled = True
@@ -1054,9 +1095,19 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         self.ticker_window.paint_ticker(self)
         self._paint_call_time = call_time
         
-        # Simple continuous rendering - don't try to limit FPS, let it run fast
-        # High FPS is better than Windows throttling us
+        # Continuous rendering with light FPS limiting
+        # Target 144 FPS (6.94ms) but allow flexibility for smooth scrolling
+        # This prevents CPU waste at 600+ FPS while keeping scrolling butter-smooth
         if self.continuous_rendering:
+            target_interval = 1.0 / 144.0  # 144 FPS cap
+            elapsed = call_time - self._last_paint_time
+            
+            if elapsed < target_interval:
+                # Very brief sleep to reduce CPU usage without strict timing
+                sleep_time = max(0.001, (target_interval - elapsed) * 0.5)  # Sleep half the remaining time
+                time.sleep(sleep_time)
+            
+            self._last_paint_time = time.perf_counter()
             self.update()
             
     def mousePressEvent(self, event):
@@ -1068,10 +1119,14 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         self.unsetCursor()
     def mouseMoveEvent(self, event):
         pos = event.pos()
-        for _, _, rect in self.ticker_window.ticker_click_areas:
-            if rect.contains(pos):
-                self.setCursor(QtCore.Qt.PointingHandCursor)
-                break
+        # Check if ticker_click_areas exists before accessing
+        if hasattr(self.ticker_window, 'ticker_click_areas'):
+            for _, _, rect in self.ticker_window.ticker_click_areas:
+                if rect.contains(pos):
+                    self.setCursor(QtCore.Qt.PointingHandCursor)
+                    break
+            else:
+                self.unsetCursor()
         else:
             self.unsetCursor()
 
@@ -1186,7 +1241,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
     def show_about(self):
         about_html = (
             "<b>TCKR</b><br>"
-            "Version 1.0<br><br>"
+            "Version 1.0 alpha<br><br>"
             "A simple and powerful scrolling LED stock ticker application.<br><br>"
             "© 2025 Paul R. Charovkine. All rights reserved.<br>"
             "Licensed under the AGPL-3.0 license.<br><br>"
@@ -1229,6 +1284,102 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             self.ticker_window.showNormal()
             self.ticker_window.raise_()
             self.ticker_window.activateWindow()
+
+class SplashScreen(QtWidgets.QWidget):
+    """
+    Loading splash screen displayed on program launch.
+    Shows 'TCKR' in gold subway font with LED board background.
+    """
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            QtCore.Qt.WindowStaysOnTopHint | 
+            QtCore.Qt.FramelessWindowHint |
+            QtCore.Qt.Tool
+        )
+        self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
+        
+        # Center splash screen on primary monitor
+        screen = QtWidgets.QApplication.primaryScreen().geometry()
+        splash_width = 600
+        splash_height = 200
+        self.setGeometry(
+            (screen.width() - splash_width) // 2,
+            (screen.height() - splash_height) // 2,
+            splash_width,
+            splash_height
+        )
+        
+        # Load subway font for TCKR text
+        font_path = resource_path("SubwayTicker.ttf")
+        if os.path.exists(font_path):
+            font_id = QtGui.QFontDatabase.addApplicationFont(font_path)
+            families = QtGui.QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                self.splash_font = QtGui.QFont(families[0], 80)
+                self.splash_font.setBold(True)
+            else:
+                self.splash_font = QtGui.QFont("Arial", 80, QtGui.QFont.Bold)
+        else:
+            self.splash_font = QtGui.QFont("Arial", 80, QtGui.QFont.Bold)
+        
+        self.start_time = time.time()
+        
+    def paintEvent(self, event):
+        """Draw the splash screen with LED board background and gold TCKR text"""
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        
+        width = self.width()
+        height = self.height()
+        
+        # Draw rounded rectangle background with LED board style
+        rect = QtCore.QRectF(0, 0, width, height)
+        
+        # Create realistic LED board background with depth
+        base_color = QtGui.QColor(8, 10, 12)
+        painter.setBrush(QtGui.QBrush(base_color))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawRoundedRect(rect, 20, 20)
+        
+        # Add subtle vertical gradient for depth
+        depth_grad = QtGui.QLinearGradient(0, 0, 0, height)
+        depth_grad.setColorAt(0, QtGui.QColor(15, 18, 22, 180))
+        depth_grad.setColorAt(0.5, QtGui.QColor(12, 14, 18, 120))
+        depth_grad.setColorAt(1, QtGui.QColor(8, 10, 14, 160))
+        painter.setBrush(QtGui.QBrush(depth_grad))
+        painter.drawRoundedRect(rect, 20, 20)
+        
+        # Add horizontal scanlines (LED matrix rows)
+        painter.setClipRect(rect)
+        scanline_color = QtGui.QColor(0, 0, 0, 80)
+        scanline_highlight = QtGui.QColor(25, 30, 38, 40)
+        for y in range(0, height, 4):
+            painter.fillRect(0, y, width, 2, scanline_color)
+            if y + 2 < height:
+                painter.fillRect(0, y + 2, width, 1, scanline_highlight)
+        
+        # Add subtle LED pixel grid pattern
+        pixel_grid_color = QtGui.QColor(18, 22, 28, 30)
+        for x in range(0, width, 6):
+            painter.fillRect(x, 0, 1, height, pixel_grid_color)
+        
+        painter.setClipping(False)
+        
+        # Draw "TCKR" text in gold
+        painter.setFont(self.splash_font)
+        text = "TCKR"
+        
+        # Calculate text position (centered)
+        metrics = QtGui.QFontMetrics(self.splash_font)
+        text_width = metrics.horizontalAdvance(text)
+        text_height = metrics.height()
+        text_x = (width - text_width) // 2
+        text_y = (height + text_height) // 2 - metrics.descent()
+        
+        # Draw gold text (simple, no glow)
+        painter.setPen(QtGui.QColor(255, 215, 0))  # Gold
+        painter.drawText(text_x, text_y, text)
 
 class TickerWindow(QtWidgets.QWidget):
     FLASH_DURATION_MS = 400
@@ -1327,6 +1478,7 @@ class TickerWindow(QtWidgets.QWidget):
         fmt.setSwapInterval(1)  # 1 = VSync on, 0 = VSync off
         fmt.setSwapBehavior(QtGui.QSurfaceFormat.DoubleBuffer)
         QtGui.QSurfaceFormat.setDefaultFormat(fmt)
+        print(f"[PERF] VSync enabled for smooth rendering")
         
         # Assign unique instance ID and set window title for identification
         TickerWindow._instance_counter += 1
@@ -1370,7 +1522,7 @@ class TickerWindow(QtWidgets.QWidget):
         # Frame timing for smooth animation (import time module to avoid shadowing later)
         import time as time_module
         self.last_frame_time = time_module.perf_counter()
-        self.target_frame_interval = 1.0 / 60.0  # 60 FPS target
+        # target_frame_interval will be set after refresh rate detection
         self.ticker_pixmaps = []
         self.ticker_pixmap_widths = []
         self.gl_widget = TickerGLWidget(self)
@@ -1391,19 +1543,33 @@ class TickerWindow(QtWidgets.QWidget):
             except Exception as e:
                 print(f"[PERF] Could not boost thread priority: {e}")
         
-        # DISABLED: QTimer-based animation replaced with VSync continuous rendering
-        # QTimer was being throttled by Windows when other windows minimize/maximize
-        # New approach: paintEvent() calls update() continuously, VSync throttles to 60 FPS
-        # This completely bypasses Windows timer system - immune to focus/composition events!
-        # 
-        # self.timer = QtCore.QTimer(self)
-        # self.timer.setTimerType(QtCore.Qt.PreciseTimer)
-        # self.timer.timeout.connect(self.gl_widget.update)
-        # self.timer.start(self.timer_interval)
+        # Auto-detect display refresh rate and match it (capped at 144 FPS)
+        # This provides smooth rendering while being energy-efficient
+        try:
+            screen = QtWidgets.QApplication.primaryScreen()
+            refresh_rate = screen.refreshRate()  # Returns Hz (e.g., 60, 120, 144)
+            # Cap at 144 FPS for power efficiency on high-refresh displays
+            target_fps = min(refresh_rate, 144)
+            frame_interval = int(1000 / target_fps)  # Convert to milliseconds
+            print(f"[PERF] Detected display refresh rate: {refresh_rate} Hz, using {target_fps} FPS (interval: {frame_interval}ms)")
+        except Exception as e:
+            # Fallback to 60 FPS if detection fails
+            frame_interval = 16
+            target_fps = 60
+            print(f"[PERF] Could not detect refresh rate ({e}), defaulting to 60 FPS")
         
-        # Kick off the continuous rendering loop
-        self.gl_widget.update()  # Initial trigger, then paintEvent keeps it going
-        print(f"[PERF] VSync continuous rendering enabled - bypasses Windows timer throttling")
+        # REMOVED: High-precision render thread - replaced with VSync continuous rendering
+        # The render thread was fighting with VSync causing stutter
+        # New approach: paintEvent() calls update() continuously, VSync throttles naturally
+        # This is what TCKR.py uses and it scrolls smoothly
+        
+        # Store target FPS for frame time calculations (VSync will enforce this)
+        self.target_fps = target_fps
+        self.target_frame_interval = 1.0 / target_fps
+        
+        # Trigger initial render, then paintEvent keeps it going continuously
+        self.gl_widget.update()
+        print(f"[PERF] VSync continuous rendering enabled - bypasses timer issues")
         
         self.update_timer = QtCore.QTimer(self)
         self.update_timer.timeout.connect(self.update_prices_inplace)
@@ -2304,12 +2470,14 @@ class TickerWindow(QtWidgets.QWidget):
                     active_effects.append(f"{symbol}({elapsed:.0f}s)")
                 print(f"[GLOW] Active effects: {active_effects}")
 
-    def draw_text_with_global_glow(self, painter, x, y, text, text_color, glow_color=None):
+    def draw_text_with_global_glow(self, painter, x, y, text, text_color, glow_color=None, settings=None):
         """
         Draw text with optional global glow effect.
         If glow_color is None and global_text_glow is enabled, uses a subtle white glow.
         """
-        settings = get_settings()
+        # Use provided settings or get from cache to avoid disk I/O
+        if settings is None:
+            settings = self._cached_settings if hasattr(self, '_cached_settings') else get_settings()
         
         # Apply global glow if enabled (subtle white glow for all text)
         if settings.get("global_text_glow", True) and glow_color is None:
@@ -2436,6 +2604,10 @@ class TickerWindow(QtWidgets.QWidget):
             TickerWindow.backoff_until = 0
 
         self.on_prices_inplace_fetched(prices)
+        
+        # Run garbage collection during idle time (after price updates) to prevent stutters during rendering
+        import gc
+        gc.collect(generation=0)  # Quick collection of youngest generation only
     def on_prices_inplace_fetched(self, new_prices):
         now = int(time.time() * 1000)
         price_changed = False
@@ -2716,6 +2888,9 @@ class TickerWindow(QtWidgets.QWidget):
         
         # Don't clear ghost_frames here - we're making deep copies so they remain valid
         
+        # Get settings once for entire function to avoid disk I/O in tight loop
+        settings = self._cached_settings if hasattr(self, '_cached_settings') else get_settings()
+        
         metrics = QtGui.QFontMetrics(self.ticker_font)
         if USE_OPT:
             icon_size = opt.calculate_icon_size(self.ticker_height, 0.85)
@@ -2748,11 +2923,11 @@ class TickerWindow(QtWidgets.QWidget):
         x = 10  # Small left padding
         
         # Draw "Market:" in blue with glow
-        self.draw_text_with_global_glow(market_painter, x, text_y, market_text, market_color)
+        self.draw_text_with_global_glow(market_painter, x, text_y, market_text, market_color, settings=settings)
         x += market_text_width
         
         # Draw "Open" or "Closed" with appropriate color and glow
-        self.draw_text_with_global_glow(market_painter, x, text_y, status_text, status_color)
+        self.draw_text_with_global_glow(market_painter, x, text_y, status_text, status_color, settings=settings)
         
         market_painter.end()
         
@@ -2809,7 +2984,7 @@ class TickerWindow(QtWidgets.QWidget):
                 tkr_y = (self.ticker_height + metrics.ascent() - metrics.descent()) // 2
             symbol_rect = QtCore.QRect(x, 0, tkr_width, self.ticker_height)
             painter.setFont(self.ticker_font)
-            self.draw_text_with_global_glow(painter, x, tkr_y, tkr, QtGui.QColor("#00B3FF"))
+            self.draw_text_with_global_glow(painter, x, tkr_y, tkr, QtGui.QColor("#00B3FF"), settings=settings)
             x += tkr_width
             price_y = tkr_y
             if price is not None and prev is not None:
@@ -2856,7 +3031,7 @@ class TickerWindow(QtWidgets.QWidget):
                 painter.drawText(x, price_y, price_text)
             else:
                 # No 5% glow, use global glow if enabled
-                self.draw_text_with_global_glow(painter, x, price_y, price_text, price_color)
+                self.draw_text_with_global_glow(painter, x, price_y, price_text, price_color, settings=settings)
             x += price_width
             if change_text or pct_text:
                 painter.setFont(small_font)
@@ -2891,13 +3066,13 @@ class TickerWindow(QtWidgets.QWidget):
                     painter.drawText(x + 10, stacked_top + small_metrics.height() + 2, pct_text)
                 else:
                     # No 5% glow, use global glow if enabled
-                    self.draw_text_with_global_glow(painter, x + 10, stacked_top, change_text, color)
-                    self.draw_text_with_global_glow(painter, x + 10, stacked_top + small_metrics.height() + 2, pct_text, color)
+                    self.draw_text_with_global_glow(painter, x + 10, stacked_top, change_text, color, settings=settings)
+                    self.draw_text_with_global_glow(painter, x + 10, stacked_top + small_metrics.height() + 2, pct_text, color, settings=settings)
                 
                 painter.setFont(self.ticker_font)
                 x += 10 + change_width
             painter.setFont(self.ticker_font)
-            self.draw_text_with_global_glow(painter, x, tkr_y, sep, QtGui.QColor("#00B3FF"))
+            self.draw_text_with_global_glow(painter, x, tkr_y, sep, QtGui.QColor("#00B3FF"), settings=settings)
             painter.end()
             self.ticker_pixmaps.append(pixmap)
             self.ticker_pixmap_widths.append(total_width)
@@ -2944,7 +3119,7 @@ class TickerWindow(QtWidgets.QWidget):
                 painter.drawText(x + 1, donate_y + 1, char)
                 
                 # Draw character with global glow
-                self.draw_text_with_global_glow(painter, x, donate_y, char, color)
+                self.draw_text_with_global_glow(painter, x, donate_y, char, color, settings=settings)
         else:
             # Fall back to original implementation
             rainbow_colors = [
@@ -2962,7 +3137,7 @@ class TickerWindow(QtWidgets.QWidget):
                 painter.drawText(x + 1, donate_y + 1, char)
                 
                 # Draw character with global glow
-                self.draw_text_with_global_glow(painter, x, donate_y, char, color)
+                self.draw_text_with_global_glow(painter, x, donate_y, char, color, settings=settings)
                 x += metrics.horizontalAdvance(char)
                 
         painter.end()
@@ -2973,15 +3148,15 @@ class TickerWindow(QtWidgets.QWidget):
     def get_cycle_width(self):
         return sum(self.ticker_pixmap_widths)
 
-    def apply_led_flicker(self, painter, width, height):
+    def apply_led_flicker(self, painter, width, height, settings):
         """
         Apply realistic LED flickering effect.
         LEDs have subtle brightness variations that make them look more authentic.
         Uses time-based random variations for natural flicker patterns.
         OPTIMIZED WITH NUMBA for 3-5x faster calculations.
         """
-        # Check if LED flicker effect is enabled in settings
-        if not get_settings().get("led_flicker_effect", True):
+        # Check if LED flicker effect is enabled in settings (using cached settings)
+        if not settings.get("led_flicker_effect", True):
             return  # Skip flicker effect if disabled
         
         current_time = time.time()
@@ -3073,14 +3248,14 @@ class TickerWindow(QtWidgets.QWidget):
             scan_color = QtGui.QColor(255, 255, 255, 8)
             painter.fillRect(0, scan_y, width, 2, scan_color)
 
-    def apply_bloom_effect(self, painter, width, height):
+    def apply_bloom_effect(self, painter, width, height, settings):
         """
         Apply bloom/glow effect around bright colors.
         Simulates light emission from bright LEDs bleeding into surrounding areas.
         OPTIMIZED WITH NUMBA for 2-4x faster bloom calculations.
         """
-        # Check if bloom effect is enabled
-        if not get_settings().get("led_bloom_effect", True):
+        # Check if bloom effect is enabled (using cached settings)
+        if not settings.get("led_bloom_effect", True):
             return
         
         # Create bloom effect around visible ticker content
@@ -3178,14 +3353,14 @@ class TickerWindow(QtWidgets.QWidget):
         
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
 
-    def apply_ghosting_effect(self, painter, width, height):
+    def apply_ghosting_effect(self, painter, width, height, settings):
         """
         Apply motion blur/ghosting effect by drawing current content at offset positions.
         Simulates LED persistence and creates trailing effect on moving content.
         OPTIMIZED WITH NUMBA for faster position calculations.
         """
-        # Check if ghosting effect is enabled
-        if not get_settings().get("led_ghosting_effect", True):
+        # Check if ghosting effect is enabled (using cached settings)
+        if not settings.get("led_ghosting_effect", True):
             return
         
         # Draw ghost trails by rendering current content at offset positions
@@ -3246,14 +3421,14 @@ class TickerWindow(QtWidgets.QWidget):
         painter.setOpacity(1.0)
 
 
-    def apply_glass_glare_effect(self, painter, width, height):
+    def apply_glass_glare_effect(self, painter, width, height, settings):
         """
         Apply glass cover with reflections and glare effect.
         Simulates protective glass/plastic cover over LED display.
         OPTIMIZED WITH NUMBA for faster gradient and geometric calculations.
         """
-        # Check if glass glare effect is enabled
-        if not get_settings().get("led_glass_glare", True):
+        # Check if glass glare effect is enabled (using cached settings)
+        if not settings.get("led_glass_glare", True):
             return
         
         # Create horizontal glare bands (simulating light reflections on glass)
@@ -3374,46 +3549,68 @@ class TickerWindow(QtWidgets.QWidget):
         if not self.isVisible() or self.isMinimized():
             return
         
-        # FPS counter for diagnostic purposes
+        # FPS counter for diagnostic purposes (time-based to avoid refresh-rate dependent stutters)
         if not hasattr(self, '_fps_counter'):
             self._fps_counter = 0
-            self._fps_last_print = 0
+            self._fps_last_calc = 0
             self._current_fps = 0.0
             self._current_frame_time = 0.0
         self._fps_counter += 1
         
-        self.ticker_click_areas = []
+        # Only update click areas when mouse is over the widget (optimization)
+        update_click_areas = self.gl_widget.underMouse()
+        if update_click_areas:
+            self.ticker_click_areas = []
+        elif not hasattr(self, 'ticker_click_areas'):
+            self.ticker_click_areas = []  # Initialize if doesn't exist
+        
         painter = QtGui.QPainter(widget)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)  # Crisp pixels for LED look
+        # Disable all expensive render hints for maximum performance
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        painter.setRenderHint(QtGui.QPainter.TextAntialiasing, False)
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, False)
+        painter.setRenderHint(QtGui.QPainter.HighQualityAntialiasing, False)
         width = widget.width()
         height = self.ticker_height
         
-        # Create realistic LED board background with depth
-        # Base dark background (LED board substrate)
-        base_color = QtGui.QColor(8, 10, 12)
-        painter.fillRect(0, 0, width, height, base_color)
+        # Cache background rendering to eliminate stutter from repeated drawing
+        # This prevents repeated fillRect calls for scanlines/grid every frame
+        if not hasattr(self, '_cached_background_pixmap') or self._cached_background_pixmap.size() != QtCore.QSize(width, height):
+            # Create background pixmap with all static elements
+            self._cached_background_pixmap = QtGui.QPixmap(width, height)
+            bg_painter = QtGui.QPainter(self._cached_background_pixmap)
+            
+            # Base dark background (LED board substrate)
+            base_color = QtGui.QColor(8, 10, 12)
+            bg_painter.fillRect(0, 0, width, height, base_color)
+            
+            # Add subtle vertical gradient for depth
+            depth_grad = QtGui.QLinearGradient(0, 0, 0, height)
+            depth_grad.setColorAt(0, QtGui.QColor(15, 18, 22, 180))
+            depth_grad.setColorAt(0.5, QtGui.QColor(12, 14, 18, 120))
+            depth_grad.setColorAt(1, QtGui.QColor(8, 10, 14, 160))
+            bg_painter.fillRect(0, 0, width, height, depth_grad)
+            
+            # Add horizontal scanlines (LED matrix rows)
+            scanline_color = QtGui.QColor(0, 0, 0, 80)
+            scanline_highlight = QtGui.QColor(25, 30, 38, 40)
+            for y in range(0, height, 4):  # Every 4 pixels
+                # Dark scanline
+                bg_painter.fillRect(0, y, width, 2, scanline_color)
+                # Subtle highlight line
+                if y + 2 < height:
+                    bg_painter.fillRect(0, y + 2, width, 1, scanline_highlight)
+            
+            # Add subtle LED pixel grid pattern
+            pixel_grid_color = QtGui.QColor(18, 22, 28, 30)
+            for x in range(0, width, 6):  # Vertical lines every 6 pixels
+                bg_painter.fillRect(x, 0, 1, height, pixel_grid_color)
+            
+            bg_painter.end()
+            print(f"[PERF] Cached background pixmap created ({width}x{height})")
         
-        # Add subtle vertical gradient for depth
-        depth_grad = QtGui.QLinearGradient(0, 0, 0, height)
-        depth_grad.setColorAt(0, QtGui.QColor(15, 18, 22, 180))
-        depth_grad.setColorAt(0.5, QtGui.QColor(12, 14, 18, 120))
-        depth_grad.setColorAt(1, QtGui.QColor(8, 10, 14, 160))
-        painter.fillRect(0, 0, width, height, depth_grad)
-        
-        # Add horizontal scanlines (LED matrix rows)
-        scanline_color = QtGui.QColor(0, 0, 0, 80)
-        scanline_highlight = QtGui.QColor(25, 30, 38, 40)
-        for y in range(0, height, 4):  # Every 4 pixels
-            # Dark scanline
-            painter.fillRect(0, y, width, 2, scanline_color)
-            # Subtle highlight line
-            if y + 2 < height:
-                painter.fillRect(0, y + 2, width, 1, scanline_highlight)
-        
-        # Add subtle LED pixel grid pattern
-        pixel_grid_color = QtGui.QColor(18, 22, 28, 30)
-        for x in range(0, width, 6):  # Vertical lines every 6 pixels
-            painter.fillRect(x, 0, 1, height, pixel_grid_color)
+        # Draw cached background - single fast blit operation instead of hundreds of fillRect calls
+        painter.drawPixmap(0, 0, self._cached_background_pixmap)
         
         if self.loading:
             painter.setFont(self.ticker_font)
@@ -3422,6 +3619,7 @@ class TickerWindow(QtWidgets.QWidget):
             text_width = metrics.horizontalAdvance(text)
             x = (width - text_width) // 2
             y = (height + metrics.ascent()) // 2
+            # Use cached settings for loading text (no need to pass settings since it's only called during startup)
             self.draw_text_with_global_glow(painter, x, y, text, QtGui.QColor("#FFD700"))
             painter.end()
             return
@@ -3457,21 +3655,24 @@ class TickerWindow(QtWidgets.QWidget):
                 draw_x = x
                 # Draw stock tickers first
                 for pixmap, w, area_tpls in zip(self.ticker_pixmaps, self.ticker_pixmap_widths, self.ticker_area_templates):
-                    # Convert float to int for drawPixmap (sub-pixel scrolling uses floats)
-                    painter.drawPixmap(int(draw_x), 0, pixmap)
-                    for area_type, tkr, rect in area_tpls:
-                        offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(int(draw_x), 0)
-                        self.ticker_click_areas.append((area_type, tkr, offset_rect))
+                    # Use sub-pixel rendering with QPointF for smoother scrolling
+                    # QPainter supports fractional coordinates for anti-aliased positioning
+                    painter.drawPixmap(QtCore.QPointF(draw_x, 0.0), pixmap)
+                    if update_click_areas:
+                        for area_type, tkr, rect in area_tpls:
+                            offset_rect = QtCore.QRect(rect)
+                            offset_rect.translate(int(draw_x), 0)
+                            self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += w
                 # Then draw donate message at the end (if this cycle includes it)
                 if is_donate:
-                    # Convert float to int for drawPixmap
-                    painter.drawPixmap(int(draw_x), 0, self._donate_pixmap)
-                    for area_type, tkr, rect in self._donate_area_template:
-                        offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(int(draw_x), 0)
-                        self.ticker_click_areas.append((area_type, tkr, offset_rect))
+                    # Use sub-pixel rendering for donate pixmap too
+                    painter.drawPixmap(QtCore.QPointF(draw_x, 0.0), self._donate_pixmap)
+                    if update_click_areas:
+                        for area_type, tkr, rect in self._donate_area_template:
+                            offset_rect = QtCore.QRect(rect)
+                            offset_rect.translate(int(draw_x), 0)
+                            self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += self._donate_pixmap_width
         else:
             # Fall back to original cycle position calculation
@@ -3479,67 +3680,74 @@ class TickerWindow(QtWidgets.QWidget):
                 draw_x = x
                 # Draw stock tickers first
                 for pixmap, w, area_tpls in zip(self.ticker_pixmaps, self.ticker_pixmap_widths, self.ticker_area_templates):
-                    # Convert float to int for drawPixmap (sub-pixel scrolling uses floats)
-                    painter.drawPixmap(int(draw_x), 0, pixmap)
-                    for area_type, tkr, rect in area_tpls:
-                        offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(int(draw_x), 0)
-                        self.ticker_click_areas.append((area_type, tkr, offset_rect))
+                    # Use sub-pixel rendering with QPointF for smoother scrolling
+                    painter.drawPixmap(QtCore.QPointF(draw_x, 0.0), pixmap)
+                    if update_click_areas:
+                        for area_type, tkr, rect in area_tpls:
+                            offset_rect = QtCore.QRect(rect)
+                            offset_rect.translate(int(draw_x), 0)
+                            self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += w
                 # Then draw donate message at the end (if this cycle includes it)
                 if is_donate:
-                    # Convert float to int for drawPixmap
-                    painter.drawPixmap(int(draw_x), 0, self._donate_pixmap)
-                    for area_type, tkr, rect in self._donate_area_template:
-                        offset_rect = QtCore.QRect(rect)
-                        offset_rect.translate(int(draw_x), 0)
-                        self.ticker_click_areas.append((area_type, tkr, offset_rect))
+                    # Use sub-pixel rendering for donate pixmap
+                    painter.drawPixmap(QtCore.QPointF(draw_x, 0.0), self._donate_pixmap)
+                    if update_click_areas:
+                        for area_type, tkr, rect in self._donate_area_template:
+                            offset_rect = QtCore.QRect(rect)
+                            offset_rect.translate(int(draw_x), 0)
+                            self.ticker_click_areas.append((area_type, tkr, offset_rect))
                     draw_x += self._donate_pixmap_width
 
         supercycle_width = donate_cycle_width + 2 * base_cycle_width
 
         # Calculate frame time delta for smooth frame-independent animation
-        import time as time_module
-        current_time = time_module.perf_counter()
+        # Use cached time module to avoid import overhead
+        if not hasattr(self, '_time_module'):
+            import time as time_module
+            self._time_module = time_module
+        
+        current_time = self._time_module.perf_counter()
         delta_time = current_time - self.last_frame_time
         self.last_frame_time = current_time
         
-        # ADVANCED DIAGNOSTIC: Track what changes when stutter begins
-        if delta_time > 0.050:  # Significant stutter detected
-            # Check if Windows changed timer resolution on us
-            if sys.platform == "win32":
-                try:
-                    import ctypes
-                    ntdll = ctypes.windll.ntdll
-                    
-                    # Query current timer resolution
-                    min_res = ctypes.c_ulong()
-                    max_res = ctypes.c_ulong()
-                    current_res = ctypes.c_ulong()
-                    ntdll.NtQueryTimerResolution(ctypes.byref(min_res), ctypes.byref(max_res), ctypes.byref(current_res))
-                    
-                    # Convert from 100ns units to milliseconds
-                    current_res_ms = current_res.value / 10000.0
-                    
-                    print(f"[STUTTER] Frame took {delta_time*1000:.1f}ms | Timer res: {current_res_ms:.2f}ms")
-                except Exception as e:
-                    print(f"[STUTTER] Frame took {delta_time*1000:.1f}ms | Timer check failed: {e}")
-            else:
-                print(f"[STUTTER] Frame took {delta_time*1000:.1f}ms")
+        # Disable debug output - printing to console can cause micro-stutters
+        # Uncomment below to re-enable frame time debugging
+        """
+        if not hasattr(self, '_debug_frame_times'):
+            self._debug_frame_times = []
+            self._debug_counter = 0
         
-        # FPS counter - calculate every 60 frames
-        if hasattr(self, '_fps_counter') and self._fps_counter % 60 == 0:
-            elapsed = current_time - self._fps_last_print
-            if elapsed > 0 and self._fps_last_print > 0:
-                fps = 60 / elapsed
+        self._debug_counter += 1
+        if delta_time > 0:
+            self._debug_frame_times.append(delta_time)
+        
+        # Print frame time stats every 120 frames (every 2 seconds at 60fps)
+        if self._debug_counter % 120 == 0:
+            if self._debug_frame_times:
+                avg_frame_time = sum(self._debug_frame_times) / len(self._debug_frame_times)
+                max_frame_time = max(self._debug_frame_times)
+                min_frame_time = min(self._debug_frame_times)
+                # Count frames over 20ms (likely causing visible stutter)
+                slow_frames = sum(1 for t in self._debug_frame_times if t > 0.020)
+                print(f"[FRAME TIME] Avg: {avg_frame_time*1000:.2f}ms, Min: {min_frame_time*1000:.2f}ms, Max: {max_frame_time*1000:.2f}ms, Slow frames (>20ms): {slow_frames}/120")
+            self._debug_frame_times = []
+        """
+        
+        # FPS counter - calculate once per second (time-based, not frame-based)
+        # This prevents stutter on high-refresh displays where "every 60 frames" happens too frequently
+        if current_time - self._fps_last_calc >= 1.0:
+            if self._fps_last_calc > 0:
+                elapsed = current_time - self._fps_last_calc
+                fps = self._fps_counter / elapsed
                 
                 # Store FPS values for overlay display
                 self._current_fps = fps
-                self._current_frame_time = (elapsed/60)*1000
+                self._current_frame_time = (elapsed / self._fps_counter) * 1000
                 
                 # Only print to console if overlay is disabled
                 if not self.show_fps_overlay:
-                    print(f"[FPS] Current: {fps:.1f} FPS | Frame time: {(elapsed/60)*1000:.1f}ms avg")
+                    print(f"[FPS] Current: {fps:.1f} FPS | Frame time: {self._current_frame_time:.1f}ms avg")
                 
                 # Initialize adaptive quality state
                 if not hasattr(self, '_effects_disabled'):
@@ -3566,23 +3774,28 @@ class TickerWindow(QtWidgets.QWidget):
                 else:
                     # FPS in middle range (55-59) - maintain current state but don't count as streak
                     self._high_fps_streak = 0
-                    
-            self._fps_last_print = current_time
+            
+            # Reset counter and timer for next measurement period
+            self._fps_last_calc = current_time
+            self._fps_counter = 0
         
         # Only scroll if not paused (mouse not hovering)
         if not self.is_paused:
-            # Adjust scroll speed based on actual frame time (handles dropped frames gracefully)
-            # Cap the time multiplier to prevent huge jumps during lag spikes
-            time_multiplier = min(delta_time / self.target_frame_interval, 3.0)  # Max 3x speed compensation
-            
-            # For higher scroll speeds, use direct pixel scrolling without multiplier
-            # This prevents stuttering at high speeds where frame timing becomes less critical
-            if self.scroll_speed >= 5.0:
-                # At high speeds, use fixed scroll amount (smoother for fast movement)
-                actual_scroll = self.scroll_speed
+            # Smooth frame time using exponential moving average to reduce jitter-induced stutter
+            # This prevents visible "jerks" when Windows timer varies between frames
+            if not hasattr(self, '_smoothed_delta_time'):
+                self._smoothed_delta_time = delta_time
             else:
-                # At low speeds, use time-compensated scrolling (smoother for slow movement)
-                actual_scroll = self.scroll_speed * time_multiplier
+                # Moderate smoothing (alpha=0.3) to balance responsiveness and smoothness
+                alpha = 0.3
+                self._smoothed_delta_time = alpha * delta_time + (1 - alpha) * self._smoothed_delta_time
+            
+            # Use smoothed delta time for scroll calculation
+            time_multiplier = min(self._smoothed_delta_time / self.target_frame_interval, 3.0)
+            
+            # Use consistent time-compensated scrolling for all speeds
+            # This ensures uniform speed progression regardless of FPS
+            actual_scroll = self.scroll_speed * time_multiplier
 
             # Use optimized scroll position update with sub-pixel precision
             if USE_OPT:
@@ -3599,23 +3812,41 @@ class TickerWindow(QtWidgets.QWidget):
         # Apply visual effects if enabled (user can toggle with Effects button)
         # Check if any effects are actually enabled to avoid unnecessary function calls and settings lookups
         if self.gl_widget and self.gl_widget.effects_enabled:
-            settings = get_settings()  # Get settings once instead of in each function
-            bloom_enabled = settings.get("led_bloom_effect", True)
-            ghosting_enabled = settings.get("led_ghosting_effect", True)
-            glass_enabled = settings.get("led_glass_glare", True)
+            # Cache settings to avoid reading JSON file every frame (CRITICAL for performance)
+            if not hasattr(self, '_cached_effect_settings') or not hasattr(self, '_settings_cache_time'):
+                self._settings_cache_time = 0
+            
+            # Refresh settings cache every 5 seconds (not every frame!)
+            import time
+            current_time = time.time()
+            if current_time - self._settings_cache_time > 5.0:
+                settings = get_settings()
+                self._cached_effect_settings = {
+                    'bloom': settings.get("led_bloom_effect", True),
+                    'ghosting': settings.get("led_ghosting_effect", True),
+                    'glass': settings.get("led_glass_glare", True)
+                }
+                self._cached_settings = settings  # Store full settings for effect functions
+                self._settings_cache_time = current_time
+            
+            # Use cached settings
+            cached_settings = self._cached_settings if hasattr(self, '_cached_settings') else get_settings()
+            bloom_enabled = self._cached_effect_settings.get('bloom', True)
+            ghosting_enabled = self._cached_effect_settings.get('ghosting', True)
+            glass_enabled = self._cached_effect_settings.get('glass', True)
             
             # Only call effect functions if their individual settings are enabled
             if bloom_enabled:
                 # Apply bloom/glow effect (light bleeding from bright LEDs)
-                self.apply_bloom_effect(painter, width, height)
+                self.apply_bloom_effect(painter, width, height, cached_settings)
             
             if ghosting_enabled:
                 # Apply ghosting effect on top of everything (creates glow effect)
-                self.apply_ghosting_effect(painter, width, height)
+                self.apply_ghosting_effect(painter, width, height, cached_settings)
             
             if glass_enabled:
                 # Apply glass cover with reflections/glare (final layer on top of everything)
-                self.apply_glass_glare_effect(painter, width, height)
+                self.apply_glass_glare_effect(painter, width, height, cached_settings)
         
         # Draw FPS overlay if enabled
         if self.show_fps_overlay and hasattr(self, '_current_fps'):
@@ -3677,14 +3908,22 @@ class TickerWindow(QtWidgets.QWidget):
         if tray:
             tray.contextMenu().exec_(event.globalPos())
     def closeEvent(self, event):
+        # Stop render thread
+        if hasattr(self, '_render_thread_active'):
+            self._render_thread_active = False
+            if hasattr(self, '_render_thread_obj'):
+                try:
+                    self._render_thread_obj.join(timeout=1.0)
+                except:
+                    pass
+        
         # Stop continuous rendering
         if hasattr(self, 'gl_widget') and hasattr(self.gl_widget, 'continuous_rendering'):
             self.gl_widget.continuous_rendering = False
         
         # Stop all timers immediately to prevent further processing
-        # Note: Animation timer is now disabled (using VSync continuous rendering)
-        # if hasattr(self, 'timer') and self.timer.isActive():
-        #     self.timer.stop()
+        if hasattr(self, 'render_timer') and self.render_timer.isActive():
+            self.render_timer.stop()
         if hasattr(self, 'update_timer') and self.update_timer.isActive():
             self.update_timer.stop()
         if hasattr(self, 'market_status_timer') and self.market_status_timer.isActive():
@@ -4050,48 +4289,75 @@ Examples:
     # Parse arguments FIRST before any Qt initialization
     args = parse_args()
     apply_command_line_settings(args)
+    
+    # Tune Python garbage collector to prevent periodic stutters
+    # Disable automatic GC and run it manually during idle periods
+    import gc
+    gc.disable()  # Disable automatic collection
+    gc.set_threshold(5000, 10, 10)  # Much higher thresholds for gen0, gen1, gen2
+    print(f"[PERF] Python GC tuned for smooth rendering (disabled automatic collection)")
 
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseOpenGLES)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseDesktopOpenGL)
 
-    # Cleanup any orphaned appbar registrations from previous instances
-    cleanup_orphaned_appbars()
-
     app = QtWidgets.QApplication(sys.argv)
     icon_path = resource_path("TCKR.ico")
-    app.setWindowIcon(QtGui.QIcon(icon_path)) # <-- Add this line
+    app.setWindowIcon(QtGui.QIcon(icon_path))
     app.setQuitOnLastWindowClosed(False)
     
-    # Register global cleanup handlers for emergency situations
-    if sys.platform == "win32":
-        atexit.register(global_cleanup_handler)
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+    # Show splash screen immediately - FIRST thing after QApplication creation
+    splash = SplashScreen()
+    splash.show()
+    app.processEvents()  # Force splash to display immediately
     
-    ticker_window = TickerWindow()
+    splash_start_time = time.time()
     
-    # Set global reference for emergency cleanup
-    global _global_ticker_window
-    _global_ticker_window = ticker_window
+    # Store ticker_window reference for emergency cleanup
+    ticker_window = None
     
-    ticker_window.set_transparency(get_settings().get("transparency", 100))
-    tray = TrayIcon(app, ticker_window)
-    ticker_window.tray_icon = tray
-    tray.show()
+    def finish_initialization():
+        """Complete initialization after splash screen timer"""
+        nonlocal ticker_window
+        
+        # Cleanup any orphaned appbar registrations from previous instances
+        cleanup_orphaned_appbars()
+        
+        # Register global cleanup handlers for emergency situations
+        if sys.platform == "win32":
+            atexit.register(global_cleanup_handler)
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+        
+        ticker_window = TickerWindow()
+        
+        # Set global reference for emergency cleanup
+        global _global_ticker_window
+        _global_ticker_window = ticker_window
+        
+        ticker_window.set_transparency(get_settings().get("transparency", 100))
+        tray = TrayIcon(app, ticker_window)
+        ticker_window.tray_icon = tray
+        tray.show()
+        
+        # Close splash screen and show ticker
+        splash.close()
     
     # Add application exit handler for additional safety
     def emergency_cleanup():
         """Emergency cleanup function called when application is about to exit"""
         print("[EXIT] Emergency cleanup - ensuring AppBar is removed")
-        if sys.platform == "win32" and hasattr(ticker_window, 'winId'):
+        if sys.platform == "win32" and ticker_window and hasattr(ticker_window, 'winId'):
             try:
                 remove_appbar(int(ticker_window.winId()))
             except Exception as e:
                 print(f"[EXIT] Emergency cleanup failed: {e}")
     
     app.aboutToQuit.connect(emergency_cleanup)
+    
+    # Show splash screen for exactly 3 seconds, then initialize ticker
+    QtCore.QTimer.singleShot(3000, finish_initialization)
     
     sys.exit(app.exec_())
 
