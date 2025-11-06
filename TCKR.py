@@ -2,7 +2,7 @@
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.11.04
-Version: 1.0.0.202411041201 alpha
+Version: 1.0.0.202411041334 alpha
 License: GNU AGPLv3
 
 Description:
@@ -31,20 +31,17 @@ import signal
 import atexit
 
 # Performance optimization using Numba JIT compilation
-try:
-    import ticker_utils_numba as opt
-    USE_OPT = True
-except ImportError:
-    USE_OPT = False
-    print("[PERF] Numba file not found. Using pure Python (place ticker_utils_numba.py in the same directory)")
+# DEFERRED: Import after splash screen to avoid 3+ second startup delay
+USE_OPT = False
+opt = None
 
 # Memory optimization using pixmap pooling
-try:
-    from memory_pool import get_pooled_pixmap, return_pooled_pixmap, managed_pixmap, get_pool_stats
-    USE_MEMORY_POOL = True
-except ImportError:
-    USE_MEMORY_POOL = False
-    print("[PERF] Memory pool not available (place memory_pool.py in same directory)")
+# DEFERRED: Import after splash screen
+USE_MEMORY_POOL = False
+get_pooled_pixmap = None
+return_pooled_pixmap = None
+managed_pixmap = None
+get_pool_stats = None
 
 APPDATA_DIR = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "TCKR")
 SETTINGS_FILE = os.path.join(APPDATA_DIR, "TCKR.Settings.json")
@@ -506,6 +503,34 @@ def cleanup_orphaned_appbars():
     # Skip cleanup entirely - it was causing more problems than it solved
     # by interfering with window detection and appbar registration
     print("[STARTUP] Skipping appbar cleanup to avoid interference")
+
+def load_performance_modules():
+    """Load heavy performance modules AFTER splash screen is shown"""
+    global USE_OPT, opt, USE_MEMORY_POOL
+    global get_pooled_pixmap, return_pooled_pixmap, managed_pixmap, get_pool_stats
+    
+    # Load Numba JIT compilation module
+    try:
+        import ticker_utils_numba as opt_module
+        opt = opt_module
+        USE_OPT = True
+        print("[PERF] Numba JIT compilation available - functions will be optimized")
+    except ImportError:
+        USE_OPT = False
+        print("[PERF] Numba file not found. Using pure Python (place ticker_utils_numba.py in the same directory)")
+    
+    # Load memory pooling module
+    try:
+        import memory_pool as mp
+        get_pooled_pixmap = mp.get_pooled_pixmap
+        return_pooled_pixmap = mp.return_pooled_pixmap
+        managed_pixmap = mp.managed_pixmap
+        get_pool_stats = mp.get_pool_stats
+        USE_MEMORY_POOL = True
+        print("[PERF] Memory pool available for pixmap optimization")
+    except ImportError:
+        USE_MEMORY_POOL = False
+        print("[PERF] Memory pool not available (place memory_pool.py in same directory)")
 
 def get_settings():
     if os.path.exists(SETTINGS_FILE):
@@ -4286,17 +4311,7 @@ Examples:
                 
                 sys.exit(0)
     
-    # Parse arguments FIRST before any Qt initialization
-    args = parse_args()
-    apply_command_line_settings(args)
-    
-    # Tune Python garbage collector to prevent periodic stutters
-    # Disable automatic GC and run it manually during idle periods
-    import gc
-    gc.disable()  # Disable automatic collection
-    gc.set_threshold(5000, 10, 10)  # Much higher thresholds for gen0, gen1, gen2
-    print(f"[PERF] Python GC tuned for smooth rendering (disabled automatic collection)")
-
+    # Create QApplication IMMEDIATELY to show splash screen
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseOpenGLES)
@@ -4307,10 +4322,25 @@ Examples:
     app.setWindowIcon(QtGui.QIcon(icon_path))
     app.setQuitOnLastWindowClosed(False)
     
-    # Show splash screen immediately - FIRST thing after QApplication creation
+    # Show splash screen IMMEDIATELY before any other initialization
     splash = SplashScreen()
     splash.show()
     app.processEvents()  # Force splash to display immediately
+    
+    # Now do all the slow initialization while splash is visible
+    # Load heavy performance modules (Numba JIT takes 3+ seconds)
+    load_performance_modules()
+    
+    # Parse arguments
+    args = parse_args()
+    apply_command_line_settings(args)
+    
+    # Tune Python garbage collector to prevent periodic stutters
+    # Disable automatic GC and run it manually during idle periods
+    import gc
+    gc.disable()  # Disable automatic collection
+    gc.set_threshold(5000, 10, 10)  # Much higher thresholds for gen0, gen1, gen2
+    print(f"[PERF] Python GC tuned for smooth rendering (disabled automatic collection)")
     
     splash_start_time = time.time()
     
