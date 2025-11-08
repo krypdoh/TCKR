@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.11.04
-Version: 1.0.0.202411041334 alpha
+Date: 2025.11.07
+Version: 1.0.0.202411071152 alpha
 License: GNU AGPLv3
 
 Description:
@@ -547,6 +547,7 @@ def get_settings():
         "play_sound_on_update": True,
         "led_flicker_effect": False,  # LED flickering disabled by default (removed from render)
         "led_bloom_effect": True,  # Enable glow/bloom around bright colors
+        "led_bloom_intensity": 100,  # Bloom/glow effect intensity (0-200%)
         "led_ghosting_effect": True,  # Enable motion blur/trailing effect
         "led_icon_matrix": True,  # Apply LED matrix overlay to icons
         "led_glass_glare": True,  # Enable glass cover with reflections/glare
@@ -928,6 +929,15 @@ class SettingsDialog(QtWidgets.QDialog):
         self.led_bloom_checkbox = QtWidgets.QCheckBox("Enable LED Bloom/Glow Effect")
         self.led_bloom_checkbox.setChecked(self.settings.get("led_bloom_effect", True))
         
+        self.led_bloom_intensity_spin = QtWidgets.QSpinBox()
+        self.led_bloom_intensity_spin.setRange(10, 300)
+        self.led_bloom_intensity_spin.setSuffix("%")
+        self.led_bloom_intensity_spin.setValue(self.settings.get("led_bloom_intensity", 100))
+        self.led_bloom_intensity_spin.setToolTip("Adjust the intensity of the bloom/glow effect around text and icons\n" +
+                                                "• 50% = Subtle glow\n" +
+                                                "• 100% = Normal intensity (default)\n" + 
+                                                "• 200%+ = Strong dramatic glow")
+        
         self.led_ghosting_checkbox = QtWidgets.QCheckBox("Enable Motion Blur/Ghosting")
         self.led_ghosting_checkbox.setChecked(self.settings.get("led_ghosting_effect", True))
         
@@ -959,6 +969,7 @@ class SettingsDialog(QtWidgets.QDialog):
         layout.addRow("Choose Display:", self.display_combo)
         layout.addRow(self.led_flicker_checkbox)
         layout.addRow(self.led_bloom_checkbox)
+        layout.addRow("Bloom/Glow Intensity:", self.led_bloom_intensity_spin)
         layout.addRow(self.led_ghosting_checkbox)
         layout.addRow(self.led_icon_matrix_checkbox)
         layout.addRow(self.led_glass_glare_checkbox)
@@ -1015,6 +1026,7 @@ class SettingsDialog(QtWidgets.QDialog):
         s["proxy"] = self.proxy_edit.text().strip()
         s["led_flicker_effect"] = self.led_flicker_checkbox.isChecked()
         s["led_bloom_effect"] = self.led_bloom_checkbox.isChecked()
+        s["led_bloom_intensity"] = self.led_bloom_intensity_spin.value()
         s["led_ghosting_effect"] = self.led_ghosting_checkbox.isChecked()
         s["led_icon_matrix"] = self.led_icon_matrix_checkbox.isChecked()
         s["led_glass_glare"] = self.led_glass_glare_checkbox.isChecked()
@@ -3283,6 +3295,9 @@ class TickerWindow(QtWidgets.QWidget):
         if not settings.get("led_bloom_effect", True):
             return
         
+        # Get bloom intensity setting (10-300%, default 100%)
+        bloom_intensity = settings.get("led_bloom_intensity", 100) / 100.0
+        
         # Create bloom effect around visible ticker content
         # Apply to each visible ticker element for consistent glow
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
@@ -3316,33 +3331,42 @@ class TickerWindow(QtWidgets.QWidget):
                 
                 # Use optimized alpha calculations for better gradient
                 if USE_OPT:
-                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, 33.0, 0.5)
-                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, 33.0, 0.5)
+                    base_alpha = 33.0 * bloom_intensity
+                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, base_alpha, 0.5)
+                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, base_alpha, 0.5)
                     gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), alpha_center))
                     gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), alpha_mid))
                 else:
-                    gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 33))
-                    gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 13))
+                    center_alpha = int(33 * bloom_intensity)
+                    mid_alpha = int(13 * bloom_intensity)
+                    gradient.setColorAt(0, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), center_alpha))
+                    gradient.setColorAt(0.5, QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), mid_alpha))
                     
             elif area_type == 'symbol':
                 if USE_OPT:
-                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, 33.0, 0.5)
-                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, 33.0, 0.5)
+                    base_alpha = 33.0 * bloom_intensity
+                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, base_alpha, 0.5)
+                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, base_alpha, 0.5)
                     gradient.setColorAt(0, QtGui.QColor(0, 179, 255, alpha_center))
                     gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, alpha_mid))
                 else:
-                    gradient.setColorAt(0, QtGui.QColor(0, 179, 255, 33))
-                    gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, 13))
+                    center_alpha = int(33 * bloom_intensity)
+                    mid_alpha = int(13 * bloom_intensity)
+                    gradient.setColorAt(0, QtGui.QColor(0, 179, 255, center_alpha))
+                    gradient.setColorAt(0.5, QtGui.QColor(0, 179, 255, mid_alpha))
             else:
                 # Minimal bloom for other elements like icons (don't obscure them)
                 if USE_OPT:
-                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, 13.0, 0.5)
-                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, 13.0, 0.5)
+                    base_alpha = 13.0 * bloom_intensity
+                    alpha_center = opt.calculate_radial_gradient_alpha(0, bloom_radius, base_alpha, 0.5)
+                    alpha_mid = opt.calculate_radial_gradient_alpha(bloom_radius * 0.5, bloom_radius, base_alpha, 0.5)
                     gradient.setColorAt(0, QtGui.QColor(200, 220, 255, alpha_center))
                     gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, alpha_mid))
                 else:
-                    gradient.setColorAt(0, QtGui.QColor(200, 220, 255, 13))
-                    gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, 6))
+                    center_alpha = int(13 * bloom_intensity)
+                    mid_alpha = int(6 * bloom_intensity)
+                    gradient.setColorAt(0, QtGui.QColor(200, 220, 255, center_alpha))
+                    gradient.setColorAt(0.5, QtGui.QColor(200, 220, 255, mid_alpha))
             
             gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
             
@@ -3354,11 +3378,17 @@ class TickerWindow(QtWidgets.QWidget):
         
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
 
-    def apply_bloom_to_rect(self, painter, rect, width, height):
+    def apply_bloom_to_rect(self, painter, rect, width, height, settings=None):
         """
         Apply bloom effect to a specific rectangular area.
         Used for loading screen and other special cases.
         """
+        # Get bloom intensity setting
+        if settings:
+            bloom_intensity = settings.get("led_bloom_intensity", 100) / 100.0
+        else:
+            bloom_intensity = 1.0
+            
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
         
         # Create radial gradient bloom centered on the rectangle
@@ -3367,8 +3397,13 @@ class TickerWindow(QtWidgets.QWidget):
         bloom_radius = max(rect.width(), rect.height()) * 0.8
         
         gradient = QtGui.QRadialGradient(center_x, center_y, bloom_radius)
-        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, 39))
-        gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, 17))
+        
+        # Apply intensity to alpha values
+        center_alpha = int(39 * bloom_intensity)
+        mid_alpha = int(17 * bloom_intensity)
+        
+        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, center_alpha))
+        gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, mid_alpha))
         gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
         
         painter.setBrush(QtGui.QBrush(gradient))
@@ -3582,8 +3617,11 @@ class TickerWindow(QtWidgets.QWidget):
             self._current_frame_time = 0.0
         self._fps_counter += 1
         
-        # Only update click areas when mouse is over the widget (optimization)
-        update_click_areas = self.gl_widget.underMouse()
+        # Always update click areas for bloom effects to follow text during scrolling
+        # Only skip update when bloom effect is disabled to optimize performance
+        bloom_enabled = get_settings().get("led_bloom_effect", True)
+        update_click_areas = bloom_enabled or self.gl_widget.underMouse()
+        
         if update_click_areas:
             self.ticker_click_areas = []
         elif not hasattr(self, 'ticker_click_areas'):
