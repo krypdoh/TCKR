@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.11.07
-Version: 1.0.0.202411071152 alpha
+Date: 2025.11.09
+Version: 1.0.0.202411091240-alpha
 License: GNU AGPLv3
 
 Description:
@@ -28,6 +28,26 @@ import concurrent.futures
 import argparse
 import shutil
 import signal
+from modern_gui_styles import *  # Modern dark theme styling
+
+# PERF ENHANCEMENT 7: Global session for connection pooling
+_REQUEST_SESSION = None
+
+def get_requests_session():
+    """Get or create a requests session with connection pooling"""
+    global _REQUEST_SESSION
+    if _REQUEST_SESSION is None:
+        _REQUEST_SESSION = requests.Session()
+        # Configure connection pooling
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=3
+        )
+        _REQUEST_SESSION.mount('http://', adapter)
+        _REQUEST_SESSION.mount('https://', adapter)
+        print("[PERF] Initialized HTTP session with connection pooling")
+    return _REQUEST_SESSION
 import atexit
 
 # Performance optimization using Numba JIT compilation
@@ -157,29 +177,31 @@ def set_appbar(hwnd, height, rect):
     SMTO_ABORTIFHUNG = 0x0002
     
     # CRITICAL FIX: Verify and enforce work area adjustment
-    # Get monitor info to calculate work area
+    # For multi-monitor setups, we need to check if we're on the primary monitor
     monitor_info = wintypes.RECT()
     monitor_info.left = rect.left()
     monitor_info.top = rect.top()
     monitor_info.right = rect.right()
     monitor_info.bottom = rect.bottom()
     
-    # Check current work area
+    # Check if this is the primary monitor (starts at x=0)
+    is_primary_monitor = rect.left() == 0
+    
+    # Check current work area (only meaningful for primary monitor)
     work_area_before = wintypes.RECT()
     user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_before), 0)  # SPI_GETWORKAREA = 48
     print(f"[APPBAR] Work area BEFORE: top={work_area_before.top}, bottom={work_area_before.bottom}")
+    print(f"[APPBAR] Monitor info: primary={is_primary_monitor}, x={rect.left()}")
     
     # After setting AppBar position, Windows should have adjusted work area automatically
-    # Let's verify
+    # Let's verify (but only check for primary monitor)
     work_area_check = wintypes.RECT()
     user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_check), 0)
     print(f"[APPBAR] Work area AFTER SETPOS: top={work_area_check.top}, expected={rect.top() + work_area_top_offset}")
     
-    # CRITICAL: Manually set work area to ensure other apps respect our space
-    # The AppBar API should do this automatically, but it doesn't always work reliably
-    # We only do this during initial setup, not in response to ABN_POSCHANGED (which would cause a loop)
-    # Use the actual physical window height (work_area_top_offset) not the logical height
-    if work_area_check.top < (rect.top() + work_area_top_offset):
+    # CRITICAL: Only manually adjust work area for primary monitor
+    # Secondary monitors don't use the global work area - AppBar should be sufficient
+    if is_primary_monitor and work_area_check.top < (rect.top() + work_area_top_offset):
         print(f"[APPBAR] Work area not adjusted by AppBar API - manually setting it")
         new_work_area = wintypes.RECT()
         new_work_area.left = rect.left()
@@ -204,15 +226,20 @@ def set_appbar(hwnd, height, rect):
         user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area_verify), 0)
         print(f"[APPBAR] Work area after manual adjustment: top={work_area_verify.top}")
     else:
-        print(f"[APPBAR] Work area already correctly set at top={work_area_check.top}")
+        if is_primary_monitor:
+            print(f"[APPBAR] Work area already correctly set at top={work_area_check.top}")
+        else:
+            print(f"[APPBAR] Secondary monitor - AppBar registration sufficient, work area not applicable")
     
     # Broadcast WM_SETTINGCHANGE with work area change to notify other apps
-    # This is separate from the SystemParametersInfo call above
-    user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
-                                47, 0,  # SPI_SETWORKAREA = 47
-                                SMTO_ABORTIFHUNG, 2000, None)
-    
-    print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE to all windows")
+    # Only broadcast if we're on primary monitor and actually changed work area
+    if is_primary_monitor:
+        user32.SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 
+                                    47, 0,  # SPI_SETWORKAREA = 47
+                                    SMTO_ABORTIFHUNG, 2000, None)
+        print(f"[APPBAR] Broadcasted WM_SETTINGCHANGE to all windows (primary monitor)")
+    else:
+        print(f"[APPBAR] Skipping WM_SETTINGCHANGE broadcast (secondary monitor)")
     
     # CRITICAL: Force window position AFTER broadcasts using SetWindowPos
     # The broadcasts may cause Windows to reposition windows, so we need to 
@@ -474,24 +501,35 @@ def diagnose_appbar_state(hwnd, expected_height):
     user32.GetWindowRect(hwnd, ctypes.byref(window_rect))
     actual_height = window_rect.bottom - window_rect.top
     
-    # Get work area
+    # Check if this window is on the primary monitor
+    is_primary_monitor = window_rect.left == 0
+    
+    # Get work area (only meaningful for primary monitor)
     work_area = wintypes.RECT()
     user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area), 0)  # SPI_GETWORKAREA = 48
     
     print(f"[APPBAR DIAGNOSTICS]")
     print(f"  Window position: top={window_rect.top}, bottom={window_rect.bottom}, height={actual_height}")
     print(f"  Expected height: {expected_height}")
+    print(f"  Monitor type: {'Primary (x=0)' if is_primary_monitor else f'Secondary (x={window_rect.left})'}")
     print(f"  Work area: top={work_area.top}, left={work_area.left}, right={work_area.right}, bottom={work_area.bottom}")
     print(f"  Space reserved at top: {work_area.top} pixels")
     
-    if work_area.top < expected_height:
-        print(f"  ⚠️ WARNING: Work area top ({work_area.top}) is less than expected height ({expected_height})")
-        print(f"     This means Windows did not reserve the full space for the AppBar")
-        print(f"     Other windows will overlap the ticker bar")
-    elif work_area.top > expected_height:
-        print(f"  ℹ️ Work area reserved MORE space than requested ({work_area.top} vs {expected_height})")
+    if is_primary_monitor:
+        # Only check work area for primary monitor
+        if work_area.top < expected_height:
+            print(f"  ⚠️ WARNING: Work area top ({work_area.top}) is less than expected height ({expected_height})")
+            print(f"     This means Windows did not reserve the full space for the AppBar")
+            print(f"     Other windows will overlap the ticker bar")
+        elif work_area.top > expected_height:
+            print(f"  ℹ️ Work area reserved MORE space than requested ({work_area.top} vs {expected_height})")
+        else:
+            print(f"  ✓ Work area correctly reserved {expected_height} pixels at top")
     else:
-        print(f"  ✓ Work area correctly reserved {expected_height} pixels at top")
+        # Secondary monitor - work area check doesn't apply
+        print(f"  ℹ️ Secondary monitor detected - work area check not applicable")
+        print(f"     AppBar should reserve space automatically on secondary monitors")
+        print(f"     If other windows overlap, it may be a Windows compositor issue")
     
     return work_area.top
 
@@ -514,7 +552,7 @@ def load_performance_modules():
         import ticker_utils_numba as opt_module
         opt = opt_module
         USE_OPT = True
-        print("[PERF] Numba JIT compilation available - functions will be optimized")
+        # Status message already printed by ticker_utils_numba module
     except ImportError:
         USE_OPT = False
         print("[PERF] Numba file not found. Using pure Python (place ticker_utils_numba.py in the same directory)")
@@ -639,7 +677,7 @@ def fetch_finnhub_quote(ticker, api_key):
         verify = settings["cert_file"]
     try:
         print(f"[API CALL] GET {url}")
-        response = requests.get(url, timeout=10, proxies=proxies, verify=verify)
+        response = get_requests_session().get(url, timeout=10, proxies=proxies, verify=verify)
         print(f"[API RESPONSE] {ticker}: Status {response.status_code}")
         response.raise_for_status()
         data = response.json()
@@ -740,7 +778,7 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
             verify = settings["cert_file"]
         try:
             print(f"[API CALL] GET {url}")
-            response = requests.get(url, timeout=10, proxies=proxies, verify=verify)
+            response = get_requests_session().get(url, timeout=10, proxies=proxies, verify=verify)
             print(f"[API RESPONSE] {ticker}: Status {response.status_code}")
             response.raise_for_status()
             data = response.json()
@@ -805,6 +843,22 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None):
     return prices, had_429
 
 def get_ticker_icon(ticker, size=32):
+    # PERF ENHANCEMENT 4: Icon cache with LRU eviction
+    cache_key = f"{ticker.upper()}_{size}"
+    
+    # Check if we have a global window instance for cache access
+    if hasattr(get_ticker_icon, '_window_instance') and get_ticker_icon._window_instance:
+        window = get_ticker_icon._window_instance
+        if cache_key in window.icon_cache:
+            window.icon_cache_hits += 1
+            # Move to end of dict for LRU tracking
+            cached_pixmap = window.icon_cache[cache_key]
+            del window.icon_cache[cache_key]
+            window.icon_cache[cache_key] = cached_pixmap
+            return cached_pixmap
+        else:
+            window.icon_cache_misses += 1
+    
     images_dir = os.path.join(APPDATA_DIR, "TCKR.images")
     os.makedirs(images_dir, exist_ok=True)
     ticker = ticker.upper()
@@ -820,7 +874,7 @@ def get_ticker_icon(ticker, size=32):
     if pixmap is None or pixmap.isNull():
         url = f"https://raw.githubusercontent.com/krypdoh/stock-icons/refs/heads/main/ticker_icons/{ticker}.png"
         try:
-            resp = requests.get(url, timeout=5)
+            resp = get_requests_session().get(url, timeout=5)
             if resp.status_code == 200:
                 with open(local_path, "wb") as f:
                     f.write(resp.content)
@@ -888,125 +942,205 @@ def get_ticker_icon(ticker, size=32):
                 painter.fillRect(0, y, pixmap.width(), 1, led_grid_color)
     
     painter.end()
+    
+    # PERF ENHANCEMENT 4: Store in cache with LRU management
+    if hasattr(get_ticker_icon, '_window_instance') and get_ticker_icon._window_instance:
+        window = get_ticker_icon._window_instance
+        window.icon_cache[cache_key] = scanline_pixmap
+        window.manage_icon_cache_lru()
+    
     return scanline_pixmap
 
 class SettingsDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Settings")
+        self.setWindowTitle("⚙️ TCKR Settings")
         self.settings = get_settings()
-        # Store original settings to detect what changed
         self.original_settings = self.settings.copy()
-        layout = QtWidgets.QFormLayout(self)
+        
+        # Apply modern theme
+        apply_modern_theme(self)
+        self.setMinimumWidth(520)
+        
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # === API KEYS GROUP ===
+        api_group = QtWidgets.QGroupBox("🔑 API Keys")
+        api_layout = QtWidgets.QFormLayout(api_group)
+        api_layout.setSpacing(8)
+        api_layout.setContentsMargins(12, 20, 12, 12)
 
         self.finnhub_api_key_edit = QtWidgets.QLineEdit(self.settings.get("finnhub_api_key", ""))
         self.finnhub_api_key_edit.setEchoMode(QtWidgets.QLineEdit.Password)
-        layout.addRow("Finnhub API Key:", self.finnhub_api_key_edit)
+        self.finnhub_api_key_edit.setPlaceholderText("Primary Finnhub API key")
+        api_layout.addRow("Primary Key:", self.finnhub_api_key_edit)
 
         self.finnhub_api_key_2_edit = QtWidgets.QLineEdit(self.settings.get("finnhub_api_key_2", ""))
         self.finnhub_api_key_2_edit.setEchoMode(QtWidgets.QLineEdit.Password)
         self.finnhub_api_key_2_edit.setPlaceholderText("Optional - for load balancing")
-        layout.addRow("Finnhub API Key 2:", self.finnhub_api_key_2_edit)
-
-        self.transparency_spin = QtWidgets.QSpinBox()
-        self.transparency_spin.setRange(0, 100)
-        self.transparency_spin.setValue(self.settings.get("transparency", 100))
-        self.scroll_speed_spin = QtWidgets.QSpinBox()
-        self.scroll_speed_spin.setRange(1, 50)
-        self.scroll_speed_spin.setValue(self.settings.get("speed", 2))
+        api_layout.addRow("Secondary Key:", self.finnhub_api_key_2_edit)
+        
+        layout.addWidget(api_group)
+        
+        # === APPEARANCE GROUP ===
+        appearance_group = QtWidgets.QGroupBox("🎨 Appearance")
+        appearance_layout = QtWidgets.QFormLayout(appearance_group)
+        appearance_layout.setSpacing(8)
+        appearance_layout.setContentsMargins(12, 20, 12, 12)
+        
         self.ticker_height_spin = QtWidgets.QSpinBox()
         self.ticker_height_spin.setRange(24, 200)
+        self.ticker_height_spin.setSuffix(" px")
         self.ticker_height_spin.setValue(self.settings.get("ticker_height", 60))
-
-        self.update_interval_spin = QtWidgets.QSpinBox()
-        self.update_interval_spin.setRange(10, 3600)
-        self.update_interval_spin.setValue(self.settings.get("update_interval", 300))
-        layout.addRow("Update Interval (seconds):", self.update_interval_spin)
-
-        self.led_flicker_checkbox = QtWidgets.QCheckBox("Enable LED Flicker Effect")
-        self.led_flicker_checkbox.setChecked(self.settings.get("led_flicker_effect", True))
+        appearance_layout.addRow("Height:", self.ticker_height_spin)
         
-        self.led_bloom_checkbox = QtWidgets.QCheckBox("Enable LED Bloom/Glow Effect")
-        self.led_bloom_checkbox.setChecked(self.settings.get("led_bloom_effect", True))
+        self.transparency_spin = QtWidgets.QSpinBox()
+        self.transparency_spin.setRange(0, 100)
+        self.transparency_spin.setSuffix(" %")
+        self.transparency_spin.setValue(self.settings.get("transparency", 100))
+        appearance_layout.addRow("Transparency:", self.transparency_spin)
         
-        self.led_bloom_intensity_spin = QtWidgets.QSpinBox()
-        self.led_bloom_intensity_spin.setRange(10, 300)
-        self.led_bloom_intensity_spin.setSuffix("%")
-        self.led_bloom_intensity_spin.setValue(self.settings.get("led_bloom_intensity", 100))
-        self.led_bloom_intensity_spin.setToolTip("Adjust the intensity of the bloom/glow effect around text and icons\n" +
-                                                "• 50% = Subtle glow\n" +
-                                                "• 100% = Normal intensity (default)\n" + 
-                                                "• 200%+ = Strong dramatic glow")
-        
-        self.led_ghosting_checkbox = QtWidgets.QCheckBox("Enable Motion Blur/Ghosting")
-        self.led_ghosting_checkbox.setChecked(self.settings.get("led_ghosting_effect", True))
-        
-        self.led_icon_matrix_checkbox = QtWidgets.QCheckBox("Enable LED Icon Matrix Overlay")
-        self.led_icon_matrix_checkbox.setChecked(self.settings.get("led_icon_matrix", True))
-        
-        self.led_glass_glare_checkbox = QtWidgets.QCheckBox("Enable Glass Cover with Glare/Reflections")
-        self.led_glass_glare_checkbox.setChecked(self.settings.get("led_glass_glare", True))
-
-        self.global_text_glow_checkbox = QtWidgets.QCheckBox("Enable Subtle Text Glow (All Text)")
-        self.global_text_glow_checkbox.setChecked(self.settings.get("global_text_glow", True))
-
-        self.play_sound_checkbox = QtWidgets.QCheckBox("Play Sound After Update")
-        self.play_sound_checkbox.setChecked(self.settings.get("play_sound_on_update", True))
-
         self.display_combo = QtWidgets.QComboBox()
         app = QtWidgets.QApplication.instance()
         screens = app.screens()
         for i, screen in enumerate(screens):
             geom = screen.geometry()
-            self.display_combo.addItem(
-                f"Display {i+1} ({geom.width()}x{geom.height()})", i
-            )
+            self.display_combo.addItem(f"Display {i+1} ({geom.width()}×{geom.height()})")
         self.display_combo.setCurrentIndex(self.settings.get("screen_index", 0))
+        appearance_layout.addRow("Display:", self.display_combo)
+        
+        layout.addWidget(appearance_group)
+        
+        # === ANIMATION GROUP ===
+        animation_group = QtWidgets.QGroupBox("⚡ Animation")
+        animation_layout = QtWidgets.QFormLayout(animation_group)
+        animation_layout.setSpacing(8)
+        animation_layout.setContentsMargins(12, 20, 12, 12)
+        
+        self.scroll_speed_spin = QtWidgets.QSpinBox()
+        self.scroll_speed_spin.setRange(1, 50)
+        self.scroll_speed_spin.setSuffix(" px/frame")
+        self.scroll_speed_spin.setValue(self.settings.get("speed", 2))
+        animation_layout.addRow("Scroll Speed:", self.scroll_speed_spin)
 
-        layout.addRow("Scroll Speed (px/frame):", self.scroll_speed_spin)
-        layout.addRow("Ticker Height (px):", self.ticker_height_spin)
-        layout.addRow("Transparency (%):", self.transparency_spin)
-        layout.addRow("Choose Display:", self.display_combo)
-        layout.addRow(self.led_flicker_checkbox)
-        layout.addRow(self.led_bloom_checkbox)
-        layout.addRow("Bloom/Glow Intensity:", self.led_bloom_intensity_spin)
-        layout.addRow(self.led_ghosting_checkbox)
-        layout.addRow(self.led_icon_matrix_checkbox)
-        layout.addRow(self.led_glass_glare_checkbox)
-        layout.addRow(self.global_text_glow_checkbox)
-        layout.addRow(self.play_sound_checkbox)
+        self.update_interval_spin = QtWidgets.QSpinBox()
+        self.update_interval_spin.setRange(10, 3600)
+        self.update_interval_spin.setSuffix(" sec")
+        self.update_interval_spin.setValue(self.settings.get("update_interval", 300))
+        animation_layout.addRow("Update Interval:", self.update_interval_spin)
+        
+        layout.addWidget(animation_group)
+        
+        # === VISUAL EFFECTS GROUP ===
+        effects_group = QtWidgets.QGroupBox("✨ Visual Effects")
+        effects_layout = QtWidgets.QVBoxLayout(effects_group)
+        effects_layout.setSpacing(6)
+        effects_layout.setContentsMargins(12, 20, 12, 12)
 
-        net_group = QtWidgets.QGroupBox("Network Settings")
-        net_layout = QtWidgets.QFormLayout(net_group)
+        self.led_flicker_checkbox = QtWidgets.QCheckBox("LED Flicker Effect")
+        self.led_flicker_checkbox.setChecked(self.settings.get("led_flicker_effect", True))
+        effects_layout.addWidget(self.led_flicker_checkbox)
+        
+        self.led_bloom_checkbox = QtWidgets.QCheckBox("LED Bloom/Glow Effect")
+        self.led_bloom_checkbox.setChecked(self.settings.get("led_bloom_effect", True))
+        effects_layout.addWidget(self.led_bloom_checkbox)
+        
+        # Bloom intensity slider (compact horizontal layout)
+        intensity_layout = QtWidgets.QHBoxLayout()
+        intensity_label = QtWidgets.QLabel("Bloom Intensity:")
+        intensity_label.setStyleSheet("margin-left: 20px; color: #b0b0b0; font-size: 10px;")
+        self.led_bloom_intensity_spin = QtWidgets.QSpinBox()
+        self.led_bloom_intensity_spin.setRange(10, 300)
+        self.led_bloom_intensity_spin.setSuffix("%")
+        self.led_bloom_intensity_spin.setValue(self.settings.get("led_bloom_intensity", 100))
+        self.led_bloom_intensity_spin.setToolTip("Adjust bloom/glow intensity\n50% = Subtle | 100% = Normal | 200%+ = Dramatic")
+        intensity_layout.addWidget(intensity_label)
+        intensity_layout.addWidget(self.led_bloom_intensity_spin)
+        intensity_layout.addStretch()
+        effects_layout.addLayout(intensity_layout)
+        
+        self.led_ghosting_checkbox = QtWidgets.QCheckBox("Motion Blur/Ghosting")
+        self.led_ghosting_checkbox.setChecked(self.settings.get("led_ghosting_effect", True))
+        effects_layout.addWidget(self.led_ghosting_checkbox)
+        
+        self.led_icon_matrix_checkbox = QtWidgets.QCheckBox("LED Icon Matrix Overlay")
+        self.led_icon_matrix_checkbox.setChecked(self.settings.get("led_icon_matrix", True))
+        effects_layout.addWidget(self.led_icon_matrix_checkbox)
+        
+        self.led_glass_glare_checkbox = QtWidgets.QCheckBox("Glass Cover with Glare")
+        self.led_glass_glare_checkbox.setChecked(self.settings.get("led_glass_glare", True))
+        effects_layout.addWidget(self.led_glass_glare_checkbox)
 
+        self.global_text_glow_checkbox = QtWidgets.QCheckBox("Subtle Text Glow")
+        self.global_text_glow_checkbox.setChecked(self.settings.get("global_text_glow", True))
+        effects_layout.addWidget(self.global_text_glow_checkbox)
+        
+        layout.addWidget(effects_group)
+        
+        # === SOUND & NETWORK (Side by side) ===
+        misc_layout = QtWidgets.QHBoxLayout()
+        misc_layout.setSpacing(12)
+        
+        # Sound checkbox
+        sound_group = QtWidgets.QGroupBox("🔊 Sound")
+        sound_layout = QtWidgets.QVBoxLayout(sound_group)
+        sound_layout.setContentsMargins(12, 20, 12, 12)
+        self.play_sound_checkbox = QtWidgets.QCheckBox("Play on Update")
+        self.play_sound_checkbox.setChecked(self.settings.get("play_sound_on_update", True))
+        sound_layout.addWidget(self.play_sound_checkbox)
+        misc_layout.addWidget(sound_group)
+        
+        # Network settings (compact)
+        net_group = QtWidgets.QGroupBox("🌐 Network")
+        net_layout = QtWidgets.QVBoxLayout(net_group)
+        net_layout.setSpacing(6)
+        net_layout.setContentsMargins(12, 20, 12, 12)
+        
+        self.use_proxy_checkbox = QtWidgets.QCheckBox("Use Proxy")
+        self.use_proxy_checkbox.setChecked(bool(self.settings.get("use_proxy", False)))
+        net_layout.addWidget(self.use_proxy_checkbox)
+        
+        self.proxy_edit = QtWidgets.QLineEdit(self.settings.get("proxy", ""))
+        self.proxy_edit.setPlaceholderText("http://proxy:port")
+        self.proxy_edit.setEnabled(self.use_proxy_checkbox.isChecked())
+        self.use_proxy_checkbox.toggled.connect(self.proxy_edit.setEnabled)
+        net_layout.addWidget(self.proxy_edit)
+        
         self.use_cert_checkbox = QtWidgets.QCheckBox("Use Certificate")
         self.use_cert_checkbox.setChecked(bool(self.settings.get("use_cert", False)))
+        net_layout.addWidget(self.use_cert_checkbox)
+        
+        cert_layout = QtWidgets.QHBoxLayout()
         self.cert_file_edit = QtWidgets.QLineEdit(self.settings.get("cert_file", ""))
+        self.cert_file_edit.setPlaceholderText("certificate.pem")
         self.cert_file_edit.setEnabled(self.use_cert_checkbox.isChecked())
-        self.cert_file_btn = QtWidgets.QPushButton("Browse...")
+        self.cert_file_btn = QtWidgets.QPushButton("📁")
+        self.cert_file_btn.setFixedWidth(32)
         self.cert_file_btn.setEnabled(self.use_cert_checkbox.isChecked())
         self.cert_file_btn.clicked.connect(self.browse_cert_file)
         self.use_cert_checkbox.toggled.connect(self.cert_file_edit.setEnabled)
         self.use_cert_checkbox.toggled.connect(self.cert_file_btn.setEnabled)
-
-        cert_layout = QtWidgets.QHBoxLayout()
         cert_layout.addWidget(self.cert_file_edit)
         cert_layout.addWidget(self.cert_file_btn)
-        net_layout.addRow(self.use_cert_checkbox, cert_layout)
-
-        self.use_proxy_checkbox = QtWidgets.QCheckBox("Use Proxy")
-        self.use_proxy_checkbox.setChecked(bool(self.settings.get("use_proxy", False)))
-        self.proxy_edit = QtWidgets.QLineEdit(self.settings.get("proxy", ""))
-        self.proxy_edit.setEnabled(self.use_proxy_checkbox.isChecked())
-        self.use_proxy_checkbox.toggled.connect(self.proxy_edit.setEnabled)
-        net_layout.addRow(self.use_proxy_checkbox, self.proxy_edit)
-
-        layout.addRow(net_group)
-
-        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        net_layout.addLayout(cert_layout)
+        
+        misc_layout.addWidget(net_group)
+        layout.addLayout(misc_layout)
+        
+        # === BUTTONS ===
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        layout.addRow(btns)
+        
+        # Style OK button with accent
+        ok_button = btns.button(QtWidgets.QDialogButtonBox.Ok)
+        make_accent_button(ok_button)
+        
+        layout.addWidget(btns)
 
     def browse_cert_file(self):
         fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select Certificate File", "", "Certificate Files (*.pem *.crt *.cer);;All Files (*)")
@@ -1276,24 +1410,82 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             self.ticker_window.update_prices()
 
     def show_about(self):
-        about_html = (
-            "<b>TCKR</b><br>"
-            "Version 1.0 alpha<br><br>"
-            "A simple and powerful scrolling LED stock ticker application.<br><br>"
-            "© 2025 Paul R. Charovkine. All rights reserved.<br>"
-            "Licensed under the AGPL-3.0 license.<br><br>"
-            'Visit our website: <a href="https://github.com/krypdoh/TCKR">https://github.com/krypdoh/TCKR</a><br><br>'
-            "Financial data thanks to<br>"
-            '<a href="https://finnhub.io">https://finnhub.io</a><br>'
-            '<a href="https://coingecko.com">https://coingecko.com</a>'
+        # Modern About dialog
+        dialog = QtWidgets.QDialog()
+        dialog.setWindowTitle("ℹ️ About TCKR")
+        apply_modern_theme(dialog)
+        dialog.setMinimumWidth(450)
+        
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+        
+        # Title with icon
+        title = QtWidgets.QLabel("📈 TCKR")
+        title.setStyleSheet("font-size: 24px; font-weight: 700; color: #00b3ff; qproperty-alignment: AlignCenter;")
+        layout.addWidget(title)
+        
+        # Version
+        version = QtWidgets.QLabel("Version 1.0 alpha")
+        version.setStyleSheet("font-size: 12px; color: #b0b0b0; qproperty-alignment: AlignCenter;")
+        layout.addWidget(version)
+        
+        # Description
+        desc = QtWidgets.QLabel("A simple and powerful scrolling LED stock ticker application.")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 11px; color: #e0e0e0; qproperty-alignment: AlignCenter; margin: 8px 0;")
+        layout.addWidget(desc)
+        
+        # Information group
+        info_group = QtWidgets.QGroupBox("📋 Information")
+        info_layout = QtWidgets.QVBoxLayout(info_group)
+        info_layout.setSpacing(8)
+        info_layout.setContentsMargins(16, 20, 16, 16)
+        
+        copyright_label = QtWidgets.QLabel("© 2025 Paul R. Charovkine. All rights reserved.")
+        copyright_label.setStyleSheet("font-size: 10px; color: #b0b0b0;")
+        info_layout.addWidget(copyright_label)
+        
+        license_label = QtWidgets.QLabel("Licensed under the AGPL-3.0 license.")
+        license_label.setStyleSheet("font-size: 10px; color: #b0b0b0;")
+        info_layout.addWidget(license_label)
+        
+        # Links
+        links_label = QtWidgets.QLabel(
+            '<a href="https://github.com/krypdoh/TCKR" style="color: #00b3ff;">GitHub Repository</a>'
         )
-        msg = QtWidgets.QMessageBox()
-        msg.setWindowTitle("About TCKR")
-        msg.setTextFormat(QtCore.Qt.RichText)
-        msg.setText(about_html)
-        msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-        msg.setTextInteractionFlags(QtCore.Qt.TextBrowserInteraction)
-        msg.exec_()
+        links_label.setOpenExternalLinks(True)
+        links_label.setStyleSheet("font-size: 11px; margin-top: 8px;")
+        info_layout.addWidget(links_label)
+        
+        # Data providers
+        providers_label = QtWidgets.QLabel(
+            'Financial data powered by:<br>'
+            '<a href="https://finnhub.io" style="color: #00b3ff;">Finnhub.io</a> • '
+            '<a href="https://coingecko.com" style="color: #00b3ff;">CoinGecko</a>'
+        )
+        providers_label.setOpenExternalLinks(True)
+        providers_label.setWordWrap(True)
+        providers_label.setStyleSheet("font-size: 10px; color: #b0b0b0; margin-top: 8px;")
+        info_layout.addWidget(providers_label)
+        
+        # Donation request
+        donate_label = QtWidgets.QLabel(
+            'Please consider <a href="https://paypal.me/paypaulc" style="color: #00b3ff;">Donating!</a>'
+        )
+        donate_label.setOpenExternalLinks(True)
+        donate_label.setStyleSheet("font-size: 11px; color: #e0e0e0; margin-top: 12px; font-weight: 600;")
+        info_layout.addWidget(donate_label)
+        
+        layout.addWidget(info_group)
+        
+        # Close button
+        close_btn = QtWidgets.QPushButton("✓ Close")
+        make_accent_button(close_btn)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+        
+        dialog.exec_()
 
     def safe_exit(self):
         """Safely exit the application with proper AppBar cleanup"""
@@ -1540,6 +1732,9 @@ class TickerWindow(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, True)  # Optimization hint
         self.setFixedHeight(self.ticker_height)
         self.icon_cache = {}
+        self.icon_cache_limit = 100  # Limit cache size to prevent memory bloat
+        self.icon_cache_hits = 0
+        self.icon_cache_misses = 0
         self.update_font_and_label()
         self.stocks = [s[0] for s in load_stocks()]
         self.prices = {}
@@ -1617,12 +1812,20 @@ class TickerWindow(QtWidgets.QWidget):
         self.market_status_timer.timeout.connect(self.update_market_status)
         self.market_status_timer.start(60000)  # Check every 60 seconds
         
+        # PERF ENHANCEMENT 6: Memory cleanup timer (every 10 minutes)
+        self.memory_cleanup_timer = QtCore.QTimer(self)
+        self.memory_cleanup_timer.timeout.connect(self.cleanup_memory_periodically)
+        self.memory_cleanup_timer.start(600000)  # 10 minutes
+        
         # DISABLED: Glow cleanup timer was causing scroll stuttering every second
         # Glow effects will now persist until next price update (every 5 minutes)
         # This eliminates the periodic pixmap rebuilds that caused stuttering
         # self.glow_cleanup_timer = QtCore.QTimer(self)
         # self.glow_cleanup_timer.timeout.connect(self.cleanup_expired_glow_effects)
         # self.glow_cleanup_timer.start(1000)
+        
+        # PERF ENHANCEMENT 4: Register window instance for icon caching
+        get_ticker_icon._window_instance = self
         
         # Show "TCKR: Loading" until first API batch completes
         self.loading = True
@@ -1794,7 +1997,7 @@ class TickerWindow(QtWidgets.QWidget):
             print(f"[INIT] Window position after show(): x={pos.x()}, y={pos.y()}")
             print(f"[INIT] Window geometry after show(): x={geom.x()}, y={geom.y()}, width={geom.width()}, height={geom.height()}")
             
-            print("[TCKR] Initialized")  # Single startup message
+            print("[TCKR] Initialized with comprehensive performance optimizations")  # Single startup message
             
             # Setup AppBar after showing - this allows coordinate_with_other_tickers to find existing windows
             QtCore.QTimer.singleShot(100, self.setup_appbar_and_position)
@@ -1816,10 +2019,174 @@ class TickerWindow(QtWidgets.QWidget):
         QtWidgets.QApplication.processEvents()  # Process the paint event
         
         # Start fetching real prices in the background AFTER loading screen is displayed
-        print("[TCKR] Starting price updates...")
-        QtCore.QTimer.singleShot(100, self.update_prices_full)
+        print("[TCKR] Starting progressive initialization...")
+        
+        # PERF ENHANCEMENT 8: Use progressive startup loading for faster initialization
+        self.progressive_startup_init()
+        
+        # Remove immediate calls - now handled by progressive loading
+        # QtCore.QTimer.singleShot(100, self.update_prices_full)
+        # QtCore.QTimer.singleShot(2000, self.preload_icons_async)
+        
         self.failed_fetch_counts = {}
         
+
+    # ========== PERFORMANCE ENHANCEMENT FUNCTIONS ==========
+    
+    def manage_icon_cache_lru(self):
+        """Manage icon cache with LRU eviction to prevent memory bloat"""
+        if len(self.icon_cache) > self.icon_cache_limit:
+            # Remove oldest 20% of cache entries
+            items_to_remove = len(self.icon_cache) - int(self.icon_cache_limit * 0.8)
+            oldest_keys = list(self.icon_cache.keys())[:items_to_remove]
+            for key in oldest_keys:
+                del self.icon_cache[key]
+            print(f"[PERF] Icon cache evicted {items_to_remove} entries (total: {len(self.icon_cache)})")
+    
+    def get_cached_settings(self):
+        """Cache settings to avoid repeated file I/O in paint loop"""
+        if not hasattr(self, '_settings_cache'):
+            self._settings_cache = {}
+            self._settings_cache_time = 0
+        
+        import time
+        current_time = time.time()
+        # Refresh cache every 5 seconds
+        if current_time - self._settings_cache_time > 5:
+            settings = get_settings()
+            self._settings_cache.update({
+                'show_bloom': settings.get('show_bloom', True),
+                'show_glow': settings.get('show_glow', True),
+                'show_glass': settings.get('show_glass', False),
+                'bloom_intensity': settings.get('bloom_intensity', 100),
+                'show_fps_overlay': settings.get('show_fps_overlay', False)
+            })
+            self._settings_cache_time = current_time
+        
+        return self._settings_cache
+    
+    def get_smart_update_interval(self):
+        """Dynamically adjust update intervals based on market hours and activity"""
+        if not hasattr(self, '_last_market_check'):
+            self._last_market_check = 0
+            self._market_is_open = True
+            
+        import time
+        current_time = time.time()
+        
+        # Check market status every 5 minutes
+        if current_time - self._last_market_check > 300:
+            try:
+                import datetime
+                now = datetime.datetime.now()
+                # Simple market hours check (9:30 AM - 4:00 PM ET weekdays)
+                if now.weekday() < 5 and 9.5 <= now.hour + now.minute/60 <= 16:
+                    self._market_is_open = True
+                    interval = self.update_interval  # Normal 5-minute updates
+                else:
+                    self._market_is_open = False
+                    interval = max(self.update_interval * 3, 900000)  # 15+ minute updates
+                
+                self._last_market_check = current_time
+                return interval
+            except:
+                return self.update_interval
+        
+        return self.update_interval * 3 if not self._market_is_open else self.update_interval
+    
+    def preload_icons_async(self):
+        """Asynchronously preload all stock icons to improve responsiveness"""
+        import concurrent.futures
+        import threading
+        
+        def load_icon_background(ticker, size):
+            try:
+                get_ticker_icon(ticker, size)
+            except Exception as e:
+                print(f"[PERF] Background icon loading failed for {ticker}: {e}")
+        
+        # Use a separate thread for icon preloading to avoid blocking UI
+        def preload_worker():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                # Preload icons for all stocks in common sizes
+                sizes = [32, 48, 64]  # Common icon sizes
+                futures = []
+                for ticker in self.stocks:
+                    for size in sizes:
+                        future = executor.submit(load_icon_background, ticker, size)
+                        futures.append(future)
+                
+                # Wait for all preloading to complete
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        future.result(timeout=1)
+                    except Exception:
+                        pass  # Ignore individual failures
+            
+            print(f"[PERF] Background icon preloading completed for {len(self.stocks)} stocks")
+        
+        # Start preloading in background
+        threading.Thread(target=preload_worker, daemon=True).start()
+    
+    def cleanup_memory_periodically(self):
+        """Periodic memory cleanup to prevent memory leaks"""
+        # Clean up icon cache if it's getting too large
+        self.manage_icon_cache_lru()
+        
+        # Clear old pixmap references
+        import gc
+        gc.collect()
+        
+        # Log memory usage if available
+        try:
+            import psutil
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            if memory_mb > 200:  # Alert if using over 200MB
+                print(f"[PERF] Memory usage: {memory_mb:.1f}MB (icon cache: {len(self.icon_cache)} items)")
+            
+            # If memory usage is very high, force more aggressive cleanup
+            if memory_mb > 500:
+                # Clear half the icon cache
+                items_to_remove = len(self.icon_cache) // 2
+                oldest_keys = list(self.icon_cache.keys())[:items_to_remove]
+                for key in oldest_keys:
+                    del self.icon_cache[key]
+                print(f"[PERF] Emergency memory cleanup: removed {items_to_remove} cached icons")
+        except ImportError:
+            pass  # psutil not available
+    
+    def progressive_startup_init(self):
+        """Load components progressively to improve startup time"""
+        # Phase 1: Essential UI (already done in constructor)
+        print("[STARTUP] Phase 1: UI initialized")
+        
+        # Phase 2: Load settings and prepare rendering (100ms delay)
+        QtCore.QTimer.singleShot(100, self.startup_phase2)
+    
+    def startup_phase2(self):
+        """Startup phase 2: Prepare rendering components"""
+        # Pre-cache settings
+        self.get_cached_settings()
+        print("[STARTUP] Phase 2: Settings cached")
+        
+        # Phase 3: Start API calls (500ms delay)
+        QtCore.QTimer.singleShot(500, self.startup_phase3)
+    
+    def startup_phase3(self):
+        """Startup phase 3: Begin API operations"""
+        # Start initial price fetch
+        self.update_prices_full()
+        print("[STARTUP] Phase 3: Initial price fetch started")
+        
+        # Phase 4: Background optimizations (2s delay)
+        QtCore.QTimer.singleShot(2000, self.startup_phase4)
+    
+    def startup_phase4(self):
+        """Startup phase 4: Background optimizations"""
+        # Start icon preloading
+        self.preload_icons_async()
+        print("[STARTUP] Phase 4: Background optimizations started")
 
 
     def ensure_top_position(self):
@@ -2590,6 +2957,12 @@ class TickerWindow(QtWidgets.QWidget):
             # print("[GLOW DEBUG] No stocks found with >= 5% change to glow")  # Commented for less verbose output
 
     def update_prices_inplace(self):
+        # PERF ENHANCEMENT 3: Use smart update intervals based on market hours
+        smart_interval = self.get_smart_update_interval()
+        if smart_interval != self.update_timer.interval():
+            self.update_timer.setInterval(smart_interval)
+            print(f"[PERF] Adjusted update interval to {smart_interval/1000}s for current market conditions")
+        
         now = time.time()
         # print(f"[BACKOFF DEBUG] update_prices_inplace called at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")  # Commented for less verbose output
         # print(f"[BACKOFF DEBUG] Current backoff_until: {getattr(TickerWindow, 'backoff_until', 0)}")  # Commented for less verbose output
@@ -3617,9 +3990,12 @@ class TickerWindow(QtWidgets.QWidget):
             self._current_frame_time = 0.0
         self._fps_counter += 1
         
+        # PERF ENHANCEMENT 2: Use cached settings to avoid repeated file I/O
+        cached_settings = self.get_cached_settings()
+        bloom_enabled = cached_settings.get('show_bloom', True)
+        
         # Always update click areas for bloom effects to follow text during scrolling
         # Only skip update when bloom effect is disabled to optimize performance
-        bloom_enabled = get_settings().get("led_bloom_effect", True)
         update_click_areas = bloom_enabled or self.gl_widget.underMouse()
         
         if update_click_areas:
@@ -4159,26 +4535,82 @@ class TickerWindow(QtWidgets.QWidget):
 class ManageStocksDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Manage Stocks")
+        self.setWindowTitle("📊 Manage Stocks")
         self.stocks = load_stocks()
         self.sort_and_refresh()
+        
+        # Apply modern theme
+        apply_modern_theme(self)
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(400)
+        
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title label
+        title = QtWidgets.QLabel("Manage Your Stock Tickers")
+        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #00b3ff; margin-bottom: 8px;")
+        layout.addWidget(title)
+        
+        # Stock list
         self.list_widget = QtWidgets.QListWidget()
+        self.list_widget.setStyleSheet("""
+            QListWidget {
+                background: #1a1d23;
+                border: 1px solid #3a3f4a;
+                border-radius: 6px;
+                padding: 8px;
+                font-size: 12px;
+                color: #ffffff;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-radius: 4px;
+                margin: 2px 0;
+            }
+            QListWidget::item:hover {
+                background: #2a2f38;
+            }
+            QListWidget::item:selected {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #00b3ff, stop:1 #0088cc);
+                color: #ffffff;
+            }
+        """)
         layout.addWidget(self.list_widget)
         self.refresh_list_widget()
+        
+        # Add stock input (compact inline)
         add_layout = QtWidgets.QHBoxLayout()
+        add_layout.setSpacing(8)
         self.ticker_entry = QtWidgets.QLineEdit()
-        add_btn = QtWidgets.QPushButton("Add")
+        self.ticker_entry.setPlaceholderText("Enter ticker symbol (e.g. AAPL)")
+        add_btn = QtWidgets.QPushButton("➕ Add")
+        make_success_button(add_btn)
         add_btn.clicked.connect(self.add_stock)
-        add_layout.addWidget(self.ticker_entry)
+        add_layout.addWidget(self.ticker_entry, 1)
         add_layout.addWidget(add_btn)
         layout.addLayout(add_layout)
-        remove_btn = QtWidgets.QPushButton("Remove Selected")
+        
+        # Remove button
+        remove_btn = QtWidgets.QPushButton("🗑️ Remove Selected")
+        make_danger_button(remove_btn)
         remove_btn.clicked.connect(self.remove_selected)
         layout.addWidget(remove_btn)
-        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        
+        # Dialog buttons
+        btns = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel
+        )
         btns.accepted.connect(self.save_and_close)
         btns.rejected.connect(self.reject)
+        
+        # Style OK/Save button
+        ok_button = btns.button(QtWidgets.QDialogButtonBox.Ok)
+        ok_button.setText("💾 Save")
+        make_accent_button(ok_button)
+        
         layout.addWidget(btns)
 
     def sort_and_refresh(self):
@@ -4209,6 +4641,7 @@ class ManageStocksDialog(QtWidgets.QDialog):
         self.sort_and_refresh()
         save_stocks(self.stocks)
         self.accept()
+
 
 def resource_path(relative_path):
     if hasattr(sys, '_MEIPASS'):
