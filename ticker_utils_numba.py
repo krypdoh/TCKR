@@ -8,8 +8,24 @@ JIT-compiled performance without requiring C compiler
 Install with: pip install numba
 """
 
-import numba
-from numba import jit, prange
+try:
+    import numba
+    from numba import jit, prange
+    NUMBA_AVAILABLE = True
+    print("[PERF] Numba JIT compilation available - functions will be optimized")
+except ImportError:
+    print("[PERF] Numba not available (Python 3.14+ not supported yet) - using pure Python fallbacks")
+    # Create dummy decorators that do nothing
+    def jit(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
+    
+    def prange(*args, **kwargs):
+        return range(*args, **kwargs)
+    
+    NUMBA_AVAILABLE = False
+
 import numpy as np
 
 
@@ -426,8 +442,8 @@ def calculate_distance_field(width, height, center_x, center_y):
     """Calculate distance field for radial effects using parallel processing."""
     distances = np.empty((height, width), dtype=np.float32)
     
-    for y in numba.prange(height):
-        for x in numba.prange(width):
+    for y in prange(height):
+        for x in prange(width):
             dx = x - center_x
             dy = y - center_y
             distances[y, x] = np.sqrt(dx * dx + dy * dy)
@@ -637,7 +653,7 @@ def parallel_glow_effect_detection(prices_array, prev_closes_array, threshold=5.
     n_stocks = prices_array.shape[0]
     glow_flags = np.empty(n_stocks, dtype=np.int32)
     
-    for i in numba.prange(n_stocks):  # Parallel loop
+    for i in prange(n_stocks):  # Parallel loop
         current_price = prices_array[i]
         prev_close = prev_closes_array[i]
         
@@ -771,7 +787,7 @@ if __name__ != '__main__':
     
     # Warm up new advanced functions
     _ = generate_rainbow_colors(30, 7)
-    _ = calculate_character_positions(10, np.array([8, 8, 8, 8, 8], dtype=np.int32), 20)
+    _ = calculate_character_positions(5, np.array([8, 8, 8, 8, 8], dtype=np.int32), 20)
     _ = calculate_scanline_positions(60, 60, 4)
     _ = calculate_grid_positions(60, 60, 6)
     
