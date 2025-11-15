@@ -34,14 +34,21 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 Currently Used:
 
 ✅ PyQt5 - Core GUI framework (imported at line 23-24)
+
 ✅ requests - HTTP requests for API calls (line 19)
+
 ✅ numpy - Used conditionally when USE_OPT=True for performance optimizations (lines 3594, 3690, 4097)
+
 ✅ pandas & pandas-market-calendars - Market hours detection (lines 461-462, function at line 456)
+
 ✅ numba - Optional JIT compilation via ticker_utils_numba.py module (loaded at line 609)
 
 Also Used (not in requirements.txt):
+
 Standard library: sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures, argparse, shutil, signal, atexit
+
 Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_pool.py (optional)
+
 
 ## Installation & Usage
 
