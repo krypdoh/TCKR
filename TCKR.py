@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.11.12
-Version: 1.0.0.2024.1112.1702-alpha
+Date: 2025.11.15
+Version: 1.0.0.2024.1115.1315-alpha
 License: GNU AGPLv3
 
 Description:
@@ -656,7 +656,9 @@ def get_settings():
         "proxy": "",
         "cert_file": "",
         "ticker_height": 60,
-        "global_text_glow": True  # Subtle glow on all text (less intense than 5% price change glow)
+        "global_text_glow": True,  # Subtle glow on all text (less intense than 5% price change glow)
+        "show_fps_overlay": False,  # FPS overlay disabled by default
+        "show_update_countdown": False  # Update countdown overlay disabled by default
     }
 
 def save_settings(settings):
@@ -1714,9 +1716,15 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.effects_action = menu.addAction("Use Visual Effects (Bloom/Glow/Glass)")
         self.effects_action.setCheckable(True)
         self.effects_action.setChecked(True)  # Enabled by default
+        
+        # Load overlay settings from file
+        settings = get_settings()
         self.fps_overlay_action = menu.addAction("Show FPS Overlay")
         self.fps_overlay_action.setCheckable(True)
-        self.fps_overlay_action.setChecked(False)  # Disabled by default
+        self.fps_overlay_action.setChecked(settings.get('show_fps_overlay', False))
+        self.update_countdown_action = menu.addAction("Show Update Countdown")
+        self.update_countdown_action.setCheckable(True)
+        self.update_countdown_action.setChecked(settings.get('show_update_countdown', False))
         menu.addSeparator()
         self.about_action = menu.addAction("About...")
         menu.addSeparator()
@@ -1728,6 +1736,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.pause_action.triggered.connect(self.toggle_pause)
         self.effects_action.triggered.connect(self.toggle_effects)
         self.fps_overlay_action.triggered.connect(self.toggle_fps_overlay)
+        self.update_countdown_action.triggered.connect(self.toggle_update_countdown)
         self.about_action.triggered.connect(self.show_about)
         self.exit_action.triggered.connect(self.safe_exit)
         self.activated.connect(self.on_activated)
@@ -1742,9 +1751,33 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             # Update the menu item checkmark
             self.fps_overlay_action.setChecked(not current_state)
             
+            # Save to settings
+            settings = get_settings()
+            settings['show_fps_overlay'] = not current_state
+            save_settings(settings)
+            
             # Print status
             status = "enabled" if not current_state else "disabled"
             print(f"[FPS OVERLAY] FPS overlay {status}")
+
+    def toggle_update_countdown(self):
+        """Toggle update countdown overlay on/off"""
+        if hasattr(self.ticker_window, 'show_update_countdown'):
+            # Toggle the overlay
+            current_state = self.ticker_window.show_update_countdown
+            self.ticker_window.show_update_countdown = not current_state
+            
+            # Update the menu item checkmark
+            self.update_countdown_action.setChecked(not current_state)
+            
+            # Save to settings
+            settings = get_settings()
+            settings['show_update_countdown'] = not current_state
+            save_settings(settings)
+            
+            # Print status
+            status = "enabled" if not current_state else "disabled"
+            print(f"[UPDATE COUNTDOWN] Update countdown overlay {status}")
 
     def toggle_pause(self):
         """Toggle pause/resume scrolling"""
@@ -1799,16 +1832,21 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
 
     def _create_new_window_immediately(self):
         """Create and configure the new ticker window"""
+        settings = get_settings()
         new_window = TickerWindow()
-        new_window.set_transparency(get_settings().get("transparency", 100))
-        new_window.scroll_speed = get_settings().get("speed", 2)
-        new_window.ticker_height = get_settings().get("ticker_height", 60)
+        new_window.set_transparency(settings.get("transparency", 100))
+        new_window.scroll_speed = settings.get("speed", 2)
+        new_window.ticker_height = settings.get("ticker_height", 60)
         new_window.setFixedHeight(new_window.ticker_height)
         new_window.update_font_and_label()
         new_window.build_ticker_pixmaps()
         new_window.gl_widget.setGeometry(0, 0, new_window.width(), new_window.ticker_height)
         new_window.gl_widget.update()
-        new_window.update_timer.setInterval(get_settings().get("update_interval", 300) * 1000)
+        new_window.update_timer.setInterval(settings.get("update_interval", 300) * 1000)
+        
+        # Restore overlay states from settings (they're already loaded in __init__ but update menu checkmarks)
+        self.fps_overlay_action.setChecked(new_window.show_fps_overlay)
+        self.update_countdown_action.setChecked(new_window.show_update_countdown)
         
         # Ensure new window is positioned at the top after creation
         if sys.platform == "win32":
@@ -1820,7 +1858,14 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
     def show_manage_stocks(self):
         dlg = ManageStocksDialog(self.ticker_window)
         if dlg.exec_():
-            self.ticker_window.update_prices()
+            # Reload stocks from file and rebuild display with existing prices
+            # Don't trigger immediate fetch to avoid 429 errors - let normal update cycle handle it
+            import time as time_module
+            self.ticker_window.stocks = [s[0] for s in load_stocks()]
+            self.ticker_window.build_ticker_text(reset_scroll=True)
+            # Reset the countdown timer so it doesn't get stuck at 0
+            self.ticker_window.last_api_update_time = time_module.time()
+            print("[MANAGE STOCKS] Stock list updated - will fetch new prices on next scheduled update")
 
     def show_about(self):
         # Modern About dialog
@@ -2253,8 +2298,14 @@ class TickerWindow(QtWidgets.QWidget):
         # Show "TCKR: Loading" until first API batch completes
         self.loading = True
         
-        # FPS overlay toggle (disabled by default)
-        self.show_fps_overlay = False
+        # FPS overlay toggle (load from settings)
+        settings = get_settings()
+        self.show_fps_overlay = settings.get('show_fps_overlay', False)
+        
+        # Update countdown overlay toggle (load from settings)
+        self.show_update_countdown = settings.get('show_update_countdown', False)
+        import time as time_module
+        self.last_api_update_time = time_module.time()  # Track when last API update occurred
         
         self.sound_effect = QSoundEffect()
         self.sound_effect.setVolume(0.5)
@@ -3280,6 +3331,8 @@ class TickerWindow(QtWidgets.QWidget):
         self.prices = prices
         self.loading = False  # Hide loading screen, show ticker with real data
         self.bloom_cache_valid = False  # Invalidate bloom cache on price update
+        import time as time_module
+        self.last_api_update_time = time_module.time()  # Record API update time
         print("[TCKR] Loading complete - building ticker display")
         self.build_ticker_text(reset_scroll=True)
 
@@ -3423,11 +3476,11 @@ class TickerWindow(QtWidgets.QWidget):
             self.update_timer.setInterval(smart_interval)
             print(f"[PERF] Adjusted update interval to {smart_interval/1000}s for current market conditions")
         
-        now = time.time()
-        # print(f"[BACKOFF DEBUG] update_prices_inplace called at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))}")  # Commented for less verbose output
-        # print(f"[BACKOFF DEBUG] Current backoff_until: {getattr(TickerWindow, 'backoff_until', 0)}")  # Commented for less verbose output
+        import time as time_module
+        now = time_module.time()
+        
         if hasattr(TickerWindow, 'backoff_until') and now < TickerWindow.backoff_until:
-            # print(f"[BACKOFF DEBUG] Skipping fetch, backoff active until {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(TickerWindow.backoff_until))}")  # Commented for less verbose output
+            print(f"[UPDATE] Skipping fetch - in backoff until {time_module.strftime('%H:%M:%S', time_module.localtime(TickerWindow.backoff_until))}")
             return
 
         api_key = ensure_finnhub_api_key(self)
@@ -3473,6 +3526,10 @@ class TickerWindow(QtWidgets.QWidget):
 
     @QtCore.pyqtSlot(dict, bool, float)
     def _handle_prices_inplace(self, prices, had_429, now):
+        # Update last API update time for countdown overlay
+        import time as time_module
+        self.last_api_update_time = time_module.time()
+        
         if had_429:
             TickerWindow.consecutive_429_cycles = getattr(TickerWindow, 'consecutive_429_cycles', 0) + 1
             # print(f"[BACKOFF DEBUG] 429 error detected. Consecutive cycles: {TickerWindow.consecutive_429_cycles}")  # Commented for less verbose output
@@ -3492,7 +3549,8 @@ class TickerWindow(QtWidgets.QWidget):
         import gc
         gc.collect(generation=0)  # Quick collection of youngest generation only
     def on_prices_inplace_fetched(self, new_prices):
-        now = int(time.time() * 1000)
+        import time as time_module
+        now = int(time_module.time() * 1000)
         price_changed = False
         
         # Optimize batch price processing with Numba if available
@@ -4833,7 +4891,7 @@ class TickerWindow(QtWidgets.QWidget):
             # Draw semi-transparent background for readability
             overlay_height = 35
             overlay_width = 110  # Reduced from 200 to fit content better
-            overlay_x = width - overlay_width  # Aligned to right edge (no margin)
+            overlay_x = width - overlay_width - 1  # Aligned to right edge with 2px left margin
             overlay_y = 0  # Aligned to top edge (no margin)
             
             # Dark background with transparency
@@ -4841,7 +4899,7 @@ class TickerWindow(QtWidgets.QWidget):
             painter.fillRect(overlay_x, overlay_y, overlay_width, overlay_height, bg_color)
             
             # Border for visual separation
-            border_color = QtGui.QColor(0, 179, 255, 200)
+            border_color = QtGui.QColor(60, 60, 60, 200)
             painter.setPen(QtGui.QPen(border_color, 1))
             painter.drawRect(overlay_x, overlay_y, overlay_width, overlay_height)
             
@@ -4871,6 +4929,60 @@ class TickerWindow(QtWidgets.QWidget):
             painter.setFont(overlay_font)
             painter.drawText(overlay_x + 10, overlay_y + 28, frame_time_text)
         
+        # Draw update countdown overlay if enabled (on far left)
+        if self.show_update_countdown and hasattr(self, 'last_api_update_time'):
+            # Calculate time until next update
+            current_time = time.time()
+            time_since_update = current_time - self.last_api_update_time
+            # Use the actual timer interval, not the configured base interval
+            update_interval_seconds = self.update_timer.interval() / 1000  # Convert ms to seconds
+            time_until_next = max(0, update_interval_seconds - time_since_update)
+            
+            # Check if we're in backoff mode
+            if hasattr(TickerWindow, 'backoff_until') and current_time < TickerWindow.backoff_until:
+                time_until_next = TickerWindow.backoff_until - current_time
+                countdown_color = QtGui.QColor(255, 165, 0)  # Orange for backoff
+            else:
+                countdown_color = QtGui.QColor(0, 179, 255)  # Cyan for normal updates
+            
+            # Draw semi-transparent background for readability (compact size)
+            overlay_height = 35
+            overlay_width = 110
+            overlay_x = 0  # Far left edge
+            overlay_y = 0  # Top edge
+            
+            # Dark background with transparency
+            bg_color = QtGui.QColor(0, 0, 0, 180)
+            painter.fillRect(overlay_x, overlay_y, overlay_width, overlay_height, bg_color)
+            
+            # Border for visual separation
+            border_color = QtGui.QColor(60, 60, 60, 200)
+            painter.setPen(QtGui.QPen(border_color, 1))
+            painter.drawRect(overlay_x, overlay_y, overlay_width, overlay_height)
+            
+            # Create smaller font for overlay
+            overlay_font = QtGui.QFont("Consolas", 9)
+            overlay_font.setBold(True)
+            painter.setFont(overlay_font)
+            painter.setPen(countdown_color)
+            
+            # Format time as MM:SS and draw
+            minutes = int(time_until_next // 60)
+            seconds = int(time_until_next % 60)
+            countdown_text = f"Next: {minutes:02d}:{seconds:02d}"
+            painter.drawText(overlay_x + 10, overlay_y + 15, countdown_text)
+            
+            # Draw interval info in smaller, dimmer text
+            if update_interval_seconds < 60:
+                interval_text = f"Every {int(update_interval_seconds)}sec"
+            else:
+                interval_minutes = int(update_interval_seconds // 60)
+                interval_text = f"Every {interval_minutes}min"
+            painter.setPen(QtGui.QColor(160, 160, 160))
+            overlay_font.setPointSize(7)
+            painter.setFont(overlay_font)
+            painter.drawText(overlay_x + 10, overlay_y + 28, interval_text)
+        
         painter.end()
     def ticker_mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
@@ -4879,8 +4991,16 @@ class TickerWindow(QtWidgets.QWidget):
                 if rect.contains(pos):
                     if area_type == 'donate':
                         webbrowser.open("https://paypal.me/paypaulc")
+                    elif area_type in ('market', 'market_label', 'market_status'):
+                        webbrowser.open("https://www.tradinghours.com/markets/nyse")
                     else:
-                        url = f"https://www.tradingview.com/symbols/{tkr}/"
+                        # Strip special characters like ^ from ticker symbol for URL
+                        clean_ticker = tkr.lstrip('^')
+                        # Special case for S&P 500 index
+                        if clean_ticker == 'GSPC':
+                            url = "https://www.tradingview.com/symbols/SPX/"
+                        else:
+                            url = f"https://www.tradingview.com/symbols/{clean_ticker}/"
                         webbrowser.open(url)
                     break
     def contextMenuEvent(self, event):
