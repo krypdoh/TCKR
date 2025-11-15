@@ -31,17 +31,17 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 
 ## Requirements
 
-- Python 3.8+
-- Modules:
-  - `requests`
-  - `PyQt5`
+Currently Used:
 
-- Font: `SubwayTicker.ttf`
+✅ PyQt5 - Core GUI framework (imported at line 23-24)
+✅ requests - HTTP requests for API calls (line 19)
+✅ numpy - Used conditionally when USE_OPT=True for performance optimizations (lines 3594, 3690, 4097)
+✅ pandas & pandas-market-calendars - Market hours detection (lines 461-462, function at line 456)
+✅ numba - Optional JIT compilation via ticker_utils_numba.py module (loaded at line 609)
 
-Install dependencies with:
-pip install -r requirements.txt
-
----
+Also Used (not in requirements.txt):
+Standard library: sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures, argparse, shutil, signal, atexit
+Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_pool.py (optional)
 
 ## Installation & Usage
 
@@ -59,7 +59,7 @@ pip install -r requirements.txt
     python TCKR/TCKR.py
     ```
 
-On first launch, you will be prompted for your [Finnhub API key](https://finnhub.io/).  
+You will need to enter in your [Finnhub API key](https://finnhub.io/) in Settings if you have stock tickers in Manage Stocks.
 
 ---
 
@@ -68,7 +68,7 @@ On first launch, you will be prompted for your [Finnhub API key](https://finnhub
 You can customize TCKR at launch with these options:
 ```sh
 -a, --api                   Finnhub API key
--c, --crypto-api            CoinGecko API key
+-̶c̶, -̶-̶c̶r̶y̶p̶t̶o̶-̶a̶p̶i̶            C̶o̶i̶n̶G̶e̶c̶k̶o̶ A̶P̶I̶ k̶e̶y̶
 -t, --tickers               Comma-separated tickers (e.g. AAPL,MSFT,T)
 -s, --speed                 Ticker scroll speed
 -ht, --height               Ticker height in pixels
