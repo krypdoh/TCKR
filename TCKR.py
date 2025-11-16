@@ -2,7 +2,7 @@
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2025.11.15
-Version: 1.0.0.2024.1115.1315-alpha
+Version: 1.0.0.2024.1116.1733-alpha
 License: GNU AGPLv3
 
 Description:
@@ -4842,8 +4842,8 @@ class TickerWindow(QtWidgets.QWidget):
                       f"ghosting={self._cached_effect_settings['ghosting']}, glass={self._cached_effect_settings['glass']}")
             
             # Refresh settings cache every 5 seconds (not every frame!)
-            import time
-            current_time = time.time()
+            import time as time_module
+            current_time = time_module.time()
             if current_time - self._settings_cache_time > 5.0:
                 settings = get_settings()
                 self._cached_effect_settings = {
@@ -4932,7 +4932,8 @@ class TickerWindow(QtWidgets.QWidget):
         # Draw update countdown overlay if enabled (on far left)
         if self.show_update_countdown and hasattr(self, 'last_api_update_time'):
             # Calculate time until next update
-            current_time = time.time()
+            import time as time_module
+            current_time = time_module.time()
             time_since_update = current_time - self.last_api_update_time
             # Use the actual timer interval, not the configured base interval
             update_interval_seconds = self.update_timer.interval() / 1000  # Convert ms to seconds
