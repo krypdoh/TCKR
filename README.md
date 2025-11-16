@@ -18,13 +18,12 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 
 ## Key Features
 
-- Real-time stock and crypto price display (Finnhub & CoinGecko APIs)
+- Real-time stock and price display (Finnhub APIs)
 - **Visual alerts**: Glowing effect for stocks with ≥5% price changes (lasts 5 minutes)
 - Customizable appearance: height, transparency, glass effect, scroll speed
 - Multi-monitor and system tray support
 - Manage tickers (add, remove, edit) via GUI
 - Command-line options for automation and scripting
-- Clickable tickers open Yahoo Finance; donation link included
 - Persistent settings and ticker list stored in user AppData
 - Windows AppBar integration for proper screen space reservation
 
