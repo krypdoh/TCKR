@@ -1,4 +1,4 @@
-# TCKR - Stock & Crypto Ticker for Windows
+# TCKR - Stock Ticker for Windows
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
 **Author:** Paul R. Charovkine  
