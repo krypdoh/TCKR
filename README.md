@@ -1,6 +1,9 @@
 # TCKR - Stock Ticker for Windows
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
+![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot.gif)
+
+
 **Author:** Paul R. Charovkine  
 **License:** GNU AGPLv3
 
