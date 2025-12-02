@@ -1,7 +1,7 @@
 # TCKR - Stock Ticker for Windows
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
-![](https://d3o8hbmq1ueggw.cloudfront.net/6ndtn%2Fpreview%2F73334651%2Fmain_full.gif?response-content-disposition=inline%3Bfilename%3D%22main_full.gif%22%3B&response-content-type=image%2Fgif&Expires=1764688696&Signature=LSj6zVFQ0xjjJRzTsHYdDwxpOxEC8tVD3vudow0dGCZ8zVyvodtrBrwugaKurlVXHFEu9WkwBjfzeAS57b7sRGROo6cFjuIqJBHZAiJMPHx0wJGBZdctz1EH1KySfTEu0PAzcQc~g3izrPnDCzmn6CdyfGXJXF-3AVnlnxrVDBxG~IGgl60CqGaz-1mSysdboHLJIaz5IiuSKVZQDYzAUvCLgIzrgGn1TGxVDBLcf4F5KtQ6KM8-94I0s-zbTG1OQfMhfxgdBece5jKoREV1Oa3lGul7bl7vTiH0wZkfkOmE0Fp5yQ0pKFhUiWD3rYDqBwf3cykh9R1N4Zh3PG6ajA__&Key-Pair-Id=APKAJT5WQLLEOADKLHBQ)
+<img src="[https://d3o8hbmq1ueggw.cloudfront.net/6ndtn%2Fpreview%2F73334651%2Fmain_full.gif](https://d3o8hbmq1ueggw.cloudfront.net/6ndtn%2Fpreview%2F73334651%2Fmain_full.gif?response-content-disposition=inline%3Bfilename%3D%22main_full.gif%22%3B&response-content-type=image%2Fgif&Expires=1764688696&Signature=LSj6zVFQ0xjjJRzTsHYdDwxpOxEC8tVD3vudow0dGCZ8zVyvodtrBrwugaKurlVXHFEu9WkwBjfzeAS57b7sRGROo6cFjuIqJBHZAiJMPHx0wJGBZdctz1EH1KySfTEu0PAzcQc~g3izrPnDCzmn6CdyfGXJXF-3AVnlnxrVDBxG~IGgl60CqGaz-1mSysdboHLJIaz5IiuSKVZQDYzAUvCLgIzrgGn1TGxVDBLcf4F5KtQ6KM8-94I0s-zbTG1OQfMhfxgdBece5jKoREV1Oa3lGul7bl7vTiH0wZkfkOmE0Fp5yQ0pKFhUiWD3rYDqBwf3cykh9R1N4Zh3PG6ajA__&Key-Pair-Id=APKAJT5WQLLEOADKLHBQ)">
 
 
 **Author:** Paul R. Charovkine  
