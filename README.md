@@ -1,7 +1,7 @@
 # TCKR - Stock Ticker for Windows
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
-![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot.gif)
+<img src="https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot.gif" alt="TCKR Screenshot GIF">
 
 
 **Author:** Paul R. Charovkine  
