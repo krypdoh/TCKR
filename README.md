@@ -3,8 +3,6 @@
 
 <img src="https://i.imgur.com/ORjiXB2.gif">
 
-<img src="https://jumpshare.com/embed/zWtwl3jr9QbX5WUkqFob">
-
 **Author:** Paul R. Charovkine  
 **License:** GNU AGPLv3
 
