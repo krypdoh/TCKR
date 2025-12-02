@@ -1,7 +1,7 @@
 # TCKR - Stock Ticker for Windows
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
-<img src="https://pouch.jumpshare.com/preview/8t6c_8L30kApZl9XcrBfIB7buQONBuoqEeQ0hTyMG-Dj_vAhuP3Dkb7WLeGXEx6Ay7wsb1hQDtAZkT2S4PzUR2S-r7wy9zXquCZw_xPEbRI">
+<img src="https://i.imgur.com/ORjiXB2.gif">
 
 <img src="https://jumpshare.com/embed/zWtwl3jr9QbX5WUkqFob">
 
