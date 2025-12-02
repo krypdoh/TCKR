@@ -3,6 +3,8 @@
 
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot.gif)
 
+![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot.gif?raw=true)
+
 **Author:** Paul R. Charovkine  
 **License:** GNU AGPLv3
 
