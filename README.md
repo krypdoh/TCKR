@@ -18,7 +18,7 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 ** Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
 ---
 
-## Key Features
+## 🔑 Key Features
 
 - Real-time stock and price display (Finnhub APIs)
 - **Visual alerts**: Glowing effect for stocks with ≥5% price changes (lasts 5 minutes)
@@ -29,6 +29,19 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 - Persistent settings and ticker list stored in user AppData
 - Windows AppBar integration for proper screen space reservation
 
+## ✅ What’s in the release
+- Faster perceived startup through progressive loading.
+- Smarter update intervals to reduce unnecessary API calls off‑hours.
+- Icon caching with LRU eviction to limit memory growth.
+- Settings caching to reduce repeated disk I/O during rendering.
+- Optional enhancements: pixmap memory pooling and JIT acceleration (Numba) when available.
+
+## 🎯 Expected impact (qualified)
+- Startup (perceived): Up to ~40–60% faster perceived startup when progressive loading is used; actual wall‑time gains depend on deferred modules and system load.
+- Memory: Significant peak memory reductions are expected on icon‑heavy or long‑running sessions when caching and periodic cleanup are active. On light workloads the effect may be negligible.
+- Network/API: Lower connection overhead in high‑frequency request scenarios due to persistent HTTP sessions; absolute improvement depends on network conditions.
+- Rendering: Smoother rendering where paint I/O was previously the bottleneck; exact gains vary by platform and GPU.
+- File I/O: Repeated settings file reads have been removed from paint loops.
 ---
 
 ## Requirements
@@ -36,19 +49,14 @@ Users can adjust appearance, scroll speed, transparency, display screen, update 
 Currently Used:
 
 ✅ PyQt5 - Core GUI framework (imported at line 23-24)
-
 ✅ requests - HTTP requests for API calls (line 19)
-
 ✅ numpy - Used conditionally when USE_OPT=True for performance optimizations (lines 3594, 3690, 4097)
-
 ✅ pandas & pandas-market-calendars - Market hours detection (lines 461-462, function at line 456)
-
 ✅ numba - Optional JIT compilation via ticker_utils_numba.py module (loaded at line 609)
 
 Also Used (not in requirements.txt):
 
 Standard library: sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures, argparse, shutil, signal, atexit
-
 Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_pool.py (optional)
 
 
@@ -66,6 +74,36 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
 
     ```sh
     python TCKR/TCKR.py
+    ```
+
+## Building the Application with PyInstaller
+
+1. **Run PyInstaller in Windows Powershell**
+
+    ```sh
+    python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
+    --add-data "TCKR.ico;." `
+    --add-data "SubwayTicker.ttf;." `
+    --add-data "notify.wav;." `
+    --hidden-import=PyQt5.QtMultimedia `
+    --hidden-import=PyQt5.sip `
+    --hidden-import=requests `
+    --hidden-import=numpy `
+    --hidden-import=psutil `
+    --hidden-import=ticker_utils_numba `
+    --hidden-import=memory_pool `
+    --hidden-import=numba `
+    --hidden-import="numba.cloudpickle.cloudpickle_fast" `
+    --hidden-import="numba.cloudpickle.cloudpickle" `
+    --hidden-import="numba.np.ufunc" `
+    --hidden-import="llvmlite.binding" `
+    TCKR.py
+    ```
+
+2. **Launch the TCKR.exe**
+
+    ```sh
+    .\dist\TCKR.exe
     ```
 
 You will need to enter in your [Finnhub API key](https://finnhub.io/) in Settings if you have stock tickers in Manage Stocks.
@@ -90,6 +128,7 @@ You can customize TCKR at launch with these options:
 ```sh
 TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 ```
+
 ---
 
 ## Settings & Customization
@@ -112,6 +151,10 @@ TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 ![TCKR Screenshot Windows 11.](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot3.png)
 
 ![TCKR Screenshot Windows 11.](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot1.png)
+
+---
+
+
 
 ---
 
