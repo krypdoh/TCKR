@@ -115,12 +115,13 @@ You will need to enter in your [Finnhub API key](https://finnhub.io/) in Setting
 You can customize TCKR at launch with these options:
 ```sh
 -a, --api                   Finnhub API key
--̶c̶, -̶-̶c̶r̶y̶p̶t̶o̶-̶a̶p̶i̶            C̶o̶i̶n̶G̶e̶c̶k̶o̶ A̶P̶I̶ k̶e̶y̶
--t, --tickers               Comma-separated tickers (e.g. AAPL,MSFT,T)
--s, --speed                 Ticker scroll speed
--ht, --height               Ticker height in pixels
--u, --update-interval       Update interval in seconds
 -b, --backup-settings       Restore settings from backup and save as current
+-̶c̶, -̶-̶c̶r̶y̶p̶t̶o̶-̶a̶p̶i̶            C̶o̶i̶n̶G̶e̶c̶k̶o̶ A̶P̶I̶ k̶e̶y̶
+-ht, --height               Ticker height in pixels
+-n, --no-splash             Disable splash screen on startup
+-s, --speed                 Ticker scroll speed
+-t, --tickers               Comma-separated tickers (e.g. AAPL,MSFT,T)
+-u, --update-interval       Update interval in seconds
 ```
 
 **Example:**
