@@ -2,7 +2,7 @@
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2026.01.17
-Version: 1.0.2026.0117.0300
+Version: 1.0.2026.0117.1207
 License: GNU AGPLv3
 
 Description:
@@ -1819,7 +1819,8 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         """Force an immediate fetch of stock prices"""
         if hasattr(self.ticker_window, 'update_prices_inplace'):
             print("[FETCH NOW] User requested immediate price update")
-            self.ticker_window.update_prices_inplace()
+            # Pass force=True to override any backoff period
+            self.ticker_window.update_prices_inplace(force=True)
             # Reset the countdown timer
             self.ticker_window.last_api_update_time = time.time()
         else:
@@ -1929,7 +1930,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         layout.addWidget(title)
         
         # Version
-        version = QtWidgets.QLabel("Version 1.0.2026.0117.0300")
+        version = QtWidgets.QLabel("Version 1.0.2026.0117.1207")
         version.setStyleSheet("font-size: 12px; color: #b0b0b0; qproperty-alignment: AlignCenter;")
         layout.addWidget(version)
         
@@ -3622,7 +3623,7 @@ class TickerWindow(QtWidgets.QWidget):
         # else:
             # print("[GLOW DEBUG] No stocks found with >= 5% change to glow")  # Commented for less verbose output
 
-    def update_prices_inplace(self):
+    def update_prices_inplace(self, force=False):
         # PERF ENHANCEMENT 3: Use smart update intervals based on market hours
         smart_interval = self.get_smart_update_interval()
         if smart_interval != self.update_timer.interval():
@@ -3632,7 +3633,8 @@ class TickerWindow(QtWidgets.QWidget):
         import time as time_module
         now = time_module.time()
         
-        if hasattr(TickerWindow, 'backoff_until') and now < TickerWindow.backoff_until:
+        # Respect backoff unless this fetch was forced by the user
+        if not force and hasattr(TickerWindow, 'backoff_until') and now < TickerWindow.backoff_until:
             print(f"[UPDATE] Skipping fetch - in backoff until {time_module.strftime('%H:%M:%S', time_module.localtime(TickerWindow.backoff_until))}")
             return
 
