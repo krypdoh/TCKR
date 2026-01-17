@@ -1,8 +1,8 @@
-"""
+﻿"""
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2025.11.15
-Version: 1.0.0.2024.1116.1733-alpha
+Date: 2026.01.17
+Version: 1.0.2026.0117.0300
 License: GNU AGPLv3
 
 Description:
@@ -658,7 +658,8 @@ def get_settings():
         "ticker_height": 60,
         "global_text_glow": True,  # Subtle glow on all text (less intense than 5% price change glow)
         "show_fps_overlay": False,  # FPS overlay disabled by default
-        "show_update_countdown": False  # Update countdown overlay disabled by default
+        "show_update_countdown": False,  # Update countdown overlay disabled by default
+        "price_indicator_style": "triangles"  # Options: "triangles" or "arrows"
     }
 
 def save_settings(settings):
@@ -1388,6 +1389,16 @@ class SettingsDialog(QtWidgets.QDialog):
         self.display_combo.setCurrentIndex(self.settings.get("screen_index", 0))
         appearance_layout.addRow("Display:", self.display_combo)
         
+        self.price_indicator_combo = QtWidgets.QComboBox()
+        self.price_indicator_combo.addItem("Arrows - Thick", "arrows")
+        self.price_indicator_combo.addItem("Arrows - Thin", "thin_arrows")
+        self.price_indicator_combo.addItem("Triangles", "triangles")
+        current_indicator = self.settings.get("price_indicator_style", "triangles")
+        index = self.price_indicator_combo.findData(current_indicator)
+        if index >= 0:
+            self.price_indicator_combo.setCurrentIndex(index)
+        appearance_layout.addRow("Price Indicator:", self.price_indicator_combo)
+        
         layout.addWidget(appearance_group)
         
         # === VISUAL EFFECTS GROUP ===
@@ -1396,23 +1407,25 @@ class SettingsDialog(QtWidgets.QDialog):
         effects_layout.setSpacing(6)
         effects_layout.setContentsMargins(12, 20, 12, 12)
 
+        # Bloom effect with intensity slider on same line
+        bloom_layout = QtWidgets.QHBoxLayout()
         self.led_bloom_checkbox = QtWidgets.QCheckBox("LED Bloom/Glow Effect")
         self.led_bloom_checkbox.setChecked(self.settings.get("led_bloom_effect", True))
-        effects_layout.addWidget(self.led_bloom_checkbox)
+        bloom_layout.addWidget(self.led_bloom_checkbox)
         
-        # Bloom intensity slider (compact horizontal layout)
-        intensity_layout = QtWidgets.QHBoxLayout()
-        intensity_label = QtWidgets.QLabel("Bloom Intensity:")
-        intensity_label.setStyleSheet("margin-left: 20px; color: #b0b0b0; font-size: 10px;")
+        bloom_layout.addSpacing(10)
+        intensity_label = QtWidgets.QLabel("Intensity:")
+        intensity_label.setStyleSheet("color: #b0b0b0; font-size: 10px;")
         self.led_bloom_intensity_spin = QtWidgets.QSpinBox()
         self.led_bloom_intensity_spin.setRange(10, 300)
         self.led_bloom_intensity_spin.setSuffix("%")
         self.led_bloom_intensity_spin.setValue(self.settings.get("led_bloom_intensity", 100))
         self.led_bloom_intensity_spin.setToolTip("Adjust bloom/glow intensity\n50% = Subtle | 100% = Normal | 200%+ = Dramatic")
-        intensity_layout.addWidget(intensity_label)
-        intensity_layout.addWidget(self.led_bloom_intensity_spin)
-        intensity_layout.addStretch()
-        effects_layout.addLayout(intensity_layout)
+        self.led_bloom_intensity_spin.setMaximumWidth(80)
+        bloom_layout.addWidget(intensity_label)
+        bloom_layout.addWidget(self.led_bloom_intensity_spin)
+        bloom_layout.addStretch()
+        effects_layout.addLayout(bloom_layout)
         
         self.led_ghosting_checkbox = QtWidgets.QCheckBox("Motion Blur/Ghosting")
         self.led_ghosting_checkbox.setChecked(self.settings.get("led_ghosting_effect", True))
@@ -1522,6 +1535,7 @@ class SettingsDialog(QtWidgets.QDialog):
         s["ticker_height"] = self.ticker_height_spin.value()
         s["update_interval"] = self.update_interval_spin.value()
         s["screen_index"] = self.display_combo.currentIndex()
+        s["price_indicator_style"] = self.price_indicator_combo.currentData()
         s["use_cert"] = self.use_cert_checkbox.isChecked()
         s["cert_file"] = self.cert_file_edit.text().strip()
         s["use_proxy"] = self.use_proxy_checkbox.isChecked()
@@ -1573,7 +1587,8 @@ class SettingsDialog(QtWidgets.QDialog):
                         self.original_settings.get("led_ghosting_effect") != s["led_ghosting_effect"] or
                         self.original_settings.get("led_icon_matrix") != s["led_icon_matrix"] or
                         self.original_settings.get("led_glass_glare") != s["led_glass_glare"] or
-                        self.original_settings.get("global_text_glow") != s["global_text_glow"]
+                        self.original_settings.get("global_text_glow") != s["global_text_glow"] or
+                        self.original_settings.get("price_indicator_style") != s["price_indicator_style"]
                     )
                     
                     if visual_effects_changed:
@@ -1588,6 +1603,10 @@ class SettingsDialog(QtWidgets.QDialog):
                         # Rebuild ticker text if global_text_glow changed (affects text rendering)
                         if self.original_settings.get("global_text_glow") != s["global_text_glow"]:
                             widget.build_ticker_text(reset_scroll=False)
+                        
+                        # Rebuild ticker pixmaps if price indicator style changed
+                        if self.original_settings.get("price_indicator_style") != s["price_indicator_style"]:
+                            widget.build_ticker_pixmaps()
                         
                         # Force immediate repaint to show new visual effects
                         widget.gl_widget.update()
@@ -1623,6 +1642,7 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         super().__init__(parent)
         self.ticker_window = parent
         self.setMouseTracking(True)
+        
         # Enable continuous rendering for smooth animation - let VSync handle frame pacing
         # This is simpler and more reliable than trying to time frames ourselves
         self.continuous_rendering = True
@@ -1641,7 +1661,7 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         # Visual effects toggle (enabled by default, user can toggle with button)
         self.effects_enabled = True
         
-        print(f"[PERF] Using QPainter on QWidget instead of OpenGL (less aggressive throttling)")
+        print(f"[PERF] Using continuous rendering with VSync for smooth scrolling")
         
     def paintEvent(self, event):
         # Track when paintEvent is called vs when it finishes
@@ -1654,26 +1674,27 @@ class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidge
         call_time = time.perf_counter()
         delay = (call_time - self._paint_call_time) * 1000 if self._paint_call_time > 0 else 0
         
-        # Check if Windows is delaying our paint events (should be ~16ms, not 20ms+)
-        if delay > 25 and self._paint_call_time > 0:  # More than 25ms between paints
+        # Check if Windows is delaying our paint events
+        if delay > 25 and self._paint_call_time > 0:
             self._paint_delay_warnings += 1
-            if self._paint_delay_warnings % 60 == 1:  # Print once per second
-                print(f"[PAINT DELAY] Windows delaying paintEvent: {delay:.1f}ms between calls (should be ~16ms)")
+            if self._paint_delay_warnings % 60 == 1:
+                print(f"[PAINT DELAY] Windows delaying paintEvent: {delay:.1f}ms")
         
         self.ticker_window.paint_ticker(self)
         self._paint_call_time = call_time
         
-        # Continuous rendering with light FPS limiting
-        # Target 144 FPS (6.94ms) but allow flexibility for smooth scrolling
-        # This prevents CPU waste at 600+ FPS while keeping scrolling butter-smooth
+        # Continuous rendering with tight FPS cap for smooth scrolling
         if self.continuous_rendering:
-            target_interval = 1.0 / 144.0  # 144 FPS cap
-            elapsed = call_time - self._last_paint_time
+            # Target slightly higher to compensate for overhead and hit true 60 FPS
+            target_interval = 1.0 / 61.5  # ~16.26ms - compensates for paint overhead
+            current_time = time.perf_counter()
+            elapsed = current_time - self._last_paint_time
             
             if elapsed < target_interval:
-                # Very brief sleep to reduce CPU usage without strict timing
-                sleep_time = max(0.001, (target_interval - elapsed) * 0.5)  # Sleep half the remaining time
-                time.sleep(sleep_time)
+                # Sleep for the full remaining time to hit target FPS
+                sleep_time = target_interval - elapsed
+                if sleep_time > 0.001:
+                    time.sleep(sleep_time)
             
             self._last_paint_time = time.perf_counter()
             self.update()
@@ -1712,6 +1733,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.pause_action = menu.addAction("Pause Scrolling")
         self.pause_action.setCheckable(True)
         self.pause_action.setChecked(False)  # Not paused by default
+        self.fetch_now_action = menu.addAction("🔄 Fetch Prices Now")
         menu.addSeparator()
         self.effects_action = menu.addAction("Use Visual Effects (Bloom/Glow/Glass)")
         self.effects_action.setCheckable(True)
@@ -1734,6 +1756,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         self.settings_action.triggered.connect(self.show_settings)
         self.stocks_action.triggered.connect(self.show_manage_stocks)
         self.pause_action.triggered.connect(self.toggle_pause)
+        self.fetch_now_action.triggered.connect(self.fetch_prices_now)
         self.effects_action.triggered.connect(self.toggle_effects)
         self.fps_overlay_action.triggered.connect(self.toggle_fps_overlay)
         self.update_countdown_action.triggered.connect(self.toggle_update_countdown)
@@ -1791,6 +1814,16 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
             # Print status
             status = "paused" if self.ticker_window.paused else "resumed"
             print(f"[PAUSE] Scrolling {status}")
+    
+    def fetch_prices_now(self):
+        """Force an immediate fetch of stock prices"""
+        if hasattr(self.ticker_window, 'update_prices_inplace'):
+            print("[FETCH NOW] User requested immediate price update")
+            self.ticker_window.update_prices_inplace()
+            # Reset the countdown timer
+            self.ticker_window.last_api_update_time = time.time()
+        else:
+            print("[FETCH NOW] Error: ticker_window does not have update_prices_inplace method")
     
     def toggle_effects(self):
         """Toggle visual effects on/off"""
@@ -1880,11 +1913,23 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         
         # Title with icon
         title = QtWidgets.QLabel("📈 TCKR")
-        title.setStyleSheet("font-size: 24px; font-weight: 700; color: #00b3ff; qproperty-alignment: AlignCenter;")
+        # Load SubwayTicker font if available and apply it
+        font_path = resource_path("SubwayTicker.ttf")
+        if os.path.exists(font_path):
+            font_id = QtGui.QFontDatabase.addApplicationFont(font_path)
+            families = QtGui.QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                title_font = QtGui.QFont(families[0])
+                title.setFont(title_font)
+                title.setStyleSheet("font-size: 36px; font-weight: bold; color: #00b3ff; qproperty-alignment: AlignCenter;")
+            else:
+                title.setStyleSheet("font-family: Arial; font-size: 36px; font-weight: bold; color: #00b3ff; qproperty-alignment: AlignCenter;")
+        else:
+            title.setStyleSheet("font-family: Arial; font-size: 36px; font-weight: bold; color: #00b3ff; qproperty-alignment: AlignCenter;")
         layout.addWidget(title)
         
         # Version
-        version = QtWidgets.QLabel("Version 1.0 alpha")
+        version = QtWidgets.QLabel("Version 1.0.2026.0117.0300")
         version.setStyleSheet("font-size: 12px; color: #b0b0b0; qproperty-alignment: AlignCenter;")
         layout.addWidget(version)
         
@@ -1900,7 +1945,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         info_layout.setSpacing(8)
         info_layout.setContentsMargins(16, 20, 16, 16)
         
-        copyright_label = QtWidgets.QLabel("© 2025 Paul R. Charovkine. All rights reserved.")
+        copyright_label = QtWidgets.QLabel("© 2026 Paul R. Charovkine. All rights reserved.")
         copyright_label.setStyleSheet("font-size: 10px; color: #b0b0b0;")
         info_layout.addWidget(copyright_label)
         
@@ -2200,6 +2245,17 @@ class TickerWindow(QtWidgets.QWidget):
         self.bloom_cache_offset = 0.0  # Track scroll offset for cache invalidation
         self.bloom_cache_valid = False  # Flag to rebuild cache when needed
         
+        # Initialize performance counters at startup to avoid hasattr checks in render loop
+        self._fps_counter = 0
+        self._fps_last_calc = 0
+        self._current_fps = 0.0
+        self._current_frame_time = 0.0
+        self.ticker_click_areas = []
+        
+        # Cache time module to avoid import overhead in render loop
+        import time as time_module
+        self._time_module = time_module
+        
         self.update_font_and_label()
         # Load stocks - load_stocks() already returns them sorted with ^ symbols first
         self.stocks = [s[0] for s in load_stocks()]
@@ -2243,20 +2299,11 @@ class TickerWindow(QtWidgets.QWidget):
             except Exception as e:
                 print(f"[PERF] Could not boost thread priority: {e}")
         
-        # Auto-detect display refresh rate and match it (capped at 144 FPS)
-        # This provides smooth rendering while being energy-efficient
-        try:
-            screen = QtWidgets.QApplication.primaryScreen()
-            refresh_rate = screen.refreshRate()  # Returns Hz (e.g., 60, 120, 144)
-            # Cap at 144 FPS for power efficiency on high-refresh displays
-            target_fps = min(refresh_rate, 144)
-            frame_interval = int(1000 / target_fps)  # Convert to milliseconds
-            print(f"[PERF] Detected display refresh rate: {refresh_rate} Hz, using {target_fps} FPS (interval: {frame_interval}ms)")
-        except Exception as e:
-            # Fallback to 60 FPS if detection fails
-            frame_interval = 16
-            target_fps = 60
-            print(f"[PERF] Could not detect refresh rate ({e}), defaulting to 60 FPS")
+        # Lock to 60 FPS for consistent, stutter-free scrolling
+        # Auto-detection was causing jitter on variable refresh rate displays
+        target_fps = 60
+        frame_interval = 16  # 16ms = ~60 FPS
+        print(f"[PERF] Locked to 60 FPS for consistent scrolling (interval: {frame_interval}ms)")
         
         # REMOVED: High-precision render thread - replaced with VSync continuous rendering
         # The render thread was fighting with VSync causing stutter
@@ -2280,10 +2327,11 @@ class TickerWindow(QtWidgets.QWidget):
         self.market_status_timer.timeout.connect(self.update_market_status)
         self.market_status_timer.start(60000)  # Check every 60 seconds
         
-        # PERF ENHANCEMENT 6: Memory cleanup timer (every 10 minutes)
-        self.memory_cleanup_timer = QtCore.QTimer(self)
-        self.memory_cleanup_timer.timeout.connect(self.cleanup_memory_periodically)
-        self.memory_cleanup_timer.start(600000)  # 10 minutes
+        # DISABLED: Memory cleanup timer - gc.collect() can cause frame drops
+        # Memory will be managed by Python's automatic garbage collector
+        # self.memory_cleanup_timer = QtCore.QTimer(self)
+        # self.memory_cleanup_timer.timeout.connect(self.cleanup_memory_periodically)
+        # self.memory_cleanup_timer.start(600000)  # 10 minutes
         
         # DISABLED: Glow cleanup timer was causing scroll stuttering every second
         # Glow effects will now persist until next price update (every 5 minutes)
@@ -3382,6 +3430,111 @@ class TickerWindow(QtWidgets.QWidget):
                     active_effects.append(f"{symbol}({elapsed:.0f}s)")
                 print(f"[GLOW] Active effects: {active_effects}")
 
+    def get_triangle_rotation(self, change_percent):
+        """
+        Returns rotation angle for price change triangle based on magnitude.
+        
+        Args:
+            change_percent: Price change as percentage
+            
+        Returns:
+            Rotation angle in degrees:
+            - 0° = pointing up (strong positive)
+            - 45° = pointing up-right (small positive)
+            - 90° = pointing right (no change)
+            - 135° = pointing down-right (small negative)
+            - 180° = pointing down (strong negative)
+        """
+        abs_change = abs(change_percent)
+        
+        if abs_change < 0.01:  # < 0.01% change
+            return 90  # Point right (essentially no change)
+        elif abs_change < 1.0:  # < 1% change
+            return 45 if change_percent > 0 else 135  # Diagonal
+        else:  # >= 1% change
+            return 0 if change_percent > 0 else 180  # Full vertical
+
+    def draw_rotated_triangle(self, painter, x, y, size, rotation_angle, color):
+        """
+        Draw a triangle rotated to the specified angle.
+        
+        Args:
+            painter: QPainter object
+            x, y: Center position for the triangle
+            size: Size of the triangle
+            rotation_angle: Rotation in degrees (0=up, 90=right, 180=down)
+            color: QColor for the triangle
+        """
+        # Create triangle polygon (pointing up by default, base slightly smaller than sides)
+        half_size = size / 2
+        triangle = QtGui.QPolygon([
+            QtCore.QPoint(0, -int(half_size)),      # Top point
+            QtCore.QPoint(-int(half_size * 0.75), int(half_size * 0.5)),  # Bottom left
+            QtCore.QPoint(int(half_size * 0.75), int(half_size * 0.5))    # Bottom right
+        ])
+        
+        # Apply rotation transform
+        transform = QtGui.QTransform()
+        transform.translate(x, y)
+        transform.rotate(rotation_angle)
+        
+        # Save current painter state
+        painter.save()
+        
+        # Apply transform and draw
+        painter.setTransform(transform, True)
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawPolygon(triangle)
+        
+        # Restore painter state
+        painter.restore()
+
+    def draw_rotated_arrow(self, painter, x, y, size, rotation_angle, color):
+        """
+        Draw an arrow rotated to the specified angle.
+        
+        Args:
+            painter: QPainter object
+            x, y: Center position for the arrow
+            size: Size of the arrow
+            rotation_angle: Rotation in degrees (0=up, 90=right, 180=down)
+            color: QColor for the arrow
+        """
+        # Create arrow shape (pointing up by default)
+        half_size = size / 2
+        shaft_width = half_size * 0.35
+        head_width = half_size * 0.75
+        
+        arrow = QtGui.QPolygon([
+            # Arrow head (top triangle)
+            QtCore.QPoint(0, -int(half_size)),      # Tip
+            QtCore.QPoint(-int(head_width), -int(half_size * 0.3)),  # Left head
+            QtCore.QPoint(-int(shaft_width), -int(half_size * 0.3)),  # Left shaft start
+            # Arrow shaft (rectangle)
+            QtCore.QPoint(-int(shaft_width), int(half_size * 0.5)),  # Left shaft bottom
+            QtCore.QPoint(int(shaft_width), int(half_size * 0.5)),   # Right shaft bottom
+            QtCore.QPoint(int(shaft_width), -int(half_size * 0.3)),  # Right shaft start
+            QtCore.QPoint(int(head_width), -int(half_size * 0.3)),   # Right head
+        ])
+        
+        # Apply rotation transform
+        transform = QtGui.QTransform()
+        transform.translate(x, y)
+        transform.rotate(rotation_angle)
+        
+        # Save current painter state
+        painter.save()
+        
+        # Apply transform and draw
+        painter.setTransform(transform, True)
+        painter.setBrush(QtGui.QBrush(color))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawPolygon(arrow)
+        
+        # Restore painter state
+        painter.restore()
+
     def draw_text_with_global_glow(self, painter, x, y, text, text_color, glow_color=None, settings=None):
         """
         Draw text with optional global glow effect.
@@ -3549,6 +3702,19 @@ class TickerWindow(QtWidgets.QWidget):
         import gc
         gc.collect(generation=0)  # Quick collection of youngest generation only
     def on_prices_inplace_fetched(self, new_prices):
+        # OPTIMIZATION: Minimal work on main thread - just update prices dict
+        # Defer all heavy processing to avoid blocking render loop
+        self._pending_price_update = new_prices
+        QtCore.QTimer.singleShot(0, self._process_price_update_deferred)
+    
+    def _process_price_update_deferred(self):
+        """Process price updates in deferred manner to avoid blocking render loop"""
+        if not hasattr(self, '_pending_price_update'):
+            return
+        
+        new_prices = self._pending_price_update
+        del self._pending_price_update
+        
         import time as time_module
         now = int(time_module.time() * 1000)
         price_changed = False
@@ -3749,12 +3915,17 @@ class TickerWindow(QtWidgets.QWidget):
                         self.glow_baseline_prices[tkr] = price  # Set baseline for initial glow
                         self.glow_history[tkr] = prev_close  # Remember this prev_close
         
+        # Rebuild pixmaps with updated prices
+        self._rebuild_pixmaps_deferred()
+        
+        if price_changed:
+            self.play_update_sound()
+    
+    def _rebuild_pixmaps_deferred(self):
+        """Rebuild ticker pixmaps in deferred manner to avoid blocking render loop"""
         self.build_ticker_pixmaps()
         self.gl_widget.update()
-        # print(f"[PRICE UPDATE] {self.prices}")
-        if price_changed:
-            # print(f"[PRICE CHANGE DETECTED]")
-            self.play_update_sound()
+    
     def set_transparency(self, percent):
         self.setWindowOpacity(percent / 100.0)
     def update_prices(self):
@@ -3834,8 +4005,11 @@ class TickerWindow(QtWidgets.QWidget):
         self.window_width = self.width()
         
         # Only reset scroll position when explicitly requested (initial load, stock list changes)
+        # Start the ticker completely off-screen to the right for a smooth entrance
         if reset_scroll:
-            self.offset = self.window_width
+            # Position text well off the right edge of the screen for smooth scroll-in
+            # Add extra padding (200px) to ensure first element is completely hidden
+            self.offset = self.window_width + 200
             
         self.build_ticker_pixmaps()
     def build_ticker_pixmaps(self):
@@ -3926,22 +4100,32 @@ class TickerWindow(QtWidgets.QWidget):
             price_width = metrics.horizontalAdvance(price_text)
             change_text = ""
             pct_text = ""
+            change = 0
+            pct = 0
+            triangle_rotation = 90  # Default to right-pointing (no change)
             if price is not None and prev is not None:
                 change = price - prev
                 pct = (change / prev * 100) if prev else 0
+                
+                # Calculate rotation angle for triangle
+                triangle_rotation = self.get_triangle_rotation(pct)
+                
                 if change > 0:
-                    change_text = f"+{abs(change):.2f}▲"
+                    change_text = f"+{abs(change):.2f}"
                     pct_text = f"+{abs(pct):.2f}%"
                 elif change < 0:
-                    change_text = f"-{abs(change):.2f}▼"
+                    change_text = f"-{abs(change):.2f}"
                     pct_text = f"-{abs(pct):.2f}%"
                 else:  # change == 0
-                    change_text = f"{change:.2f}→"
+                    change_text = f"{change:.2f}"
                     pct_text = f"{pct:.2f}%"
             change_width = max(small_metrics.horizontalAdvance(change_text), small_metrics.horizontalAdvance(pct_text)) if (change_text or pct_text) else 0
+            
+            # Add space for triangle indicator (12px width)
+            triangle_width = 12 if (change_text or pct_text) else 0
             sep = "      "
             sep_width = metrics.horizontalAdvance(sep)
-            total_width = icon_size + 8 + tkr_width + price_width + (10 + change_width if change_width else 0) + sep_width + 20
+            total_width = icon_size + 8 + tkr_width + price_width + (10 + change_width + triangle_width if change_width else 0) + sep_width + 20
             
             # Use memory pool for ticker pixmap if available
             if USE_MEMORY_POOL:
@@ -4020,15 +4204,15 @@ class TickerWindow(QtWidgets.QWidget):
                 stacked_height = small_metrics.height() * 2 + 2
                 stacked_top = (self.ticker_height - stacked_height) // 2 + small_metrics.ascent()
                 # Determine color: green for positive, red for negative, white for zero
-                if change_text.startswith("+"):
+                if change > 0:
                     color = QtGui.QColor("#00FF40")  # Green
-                elif change_text.startswith("-"):
+                elif change < 0:
                     color = QtGui.QColor("#FF5555")  # Red
                 else:
                     color = QtGui.QColor("#FFFFFF")  # White for zero change
                 
-                # Create rect for change area (for bloom effect)
-                change_rect = QtCore.QRect(x + 10, 0, change_width, self.ticker_height)
+                # Create rect for change area (for bloom effect) - now includes triangle
+                change_rect = QtCore.QRect(x + 10, 0, change_width + triangle_width, self.ticker_height)
                 
                 painter.setFont(small_font)
                 
@@ -4054,8 +4238,93 @@ class TickerWindow(QtWidgets.QWidget):
                     self.draw_text_with_global_glow(painter, x + 10, stacked_top, change_text, color, settings=settings)
                     self.draw_text_with_global_glow(painter, x + 10, stacked_top + small_metrics.height() + 2, pct_text, color, settings=settings)
                 
+                # Draw rotated indicator (triangle, arrow, or thin arrow) to the right of the change_text (top line)
+                change_text_width = small_metrics.horizontalAdvance(change_text)
+                
+                # Check which indicator style to use
+                indicator_style = settings.get("price_indicator_style", "triangles")
+                
+                # Adjust spacing based on indicator style (thin arrows closer to text)
+                if indicator_style == "thin_arrows":
+                    indicator_x = x + 10 + change_text_width + 6  # 6px padding for thin arrows
+                else:
+                    indicator_x = x + 10 + change_text_width + 16  # 16px padding for geometric shapes (more spacing)
+                
+                # Position indicator centered on the text line with rotation-based adjustment
+                base_indicator_y = stacked_top - small_metrics.ascent() // 2
+                # Adjust Y position based on rotation to keep visual center aligned
+                if triangle_rotation == 0:  # Up
+                    indicator_y = base_indicator_y + 2  # Move down slightly (top-heavy)
+                elif triangle_rotation == 180:  # Down
+                    indicator_y = base_indicator_y - 2  # Move up slightly (bottom-heavy)
+                elif triangle_rotation in [45, 135]:  # Diagonal
+                    indicator_y = base_indicator_y  # No adjustment needed
+                else:  # 90 (right)
+                    indicator_y = base_indicator_y  # No adjustment needed
+                
+                # Make indicator size dynamic based on ticker height (scales proportionally)
+                indicator_size = int(self.ticker_height * 0.42)  # ~42% of ticker height
+                
+                if indicator_style == "thin_arrows":
+                    # Use Unicode arrow symbols for thin arrows
+                    arrow_map = {
+                        0: "↑",     # Up
+                        45: "↗",    # Up-right
+                        90: "→",    # Right
+                        135: "↘",   # Down-right
+                        180: "↓"    # Down
+                    }
+                    arrow_symbol = arrow_map.get(triangle_rotation, "→")
+                    
+                    # Make arrows smaller
+                    arrow_font = QtGui.QFont(small_font)
+                    arrow_font.setPointSize(int(small_font.pointSize() * 0.7))  # Smaller arrows
+                    
+                    # Position arrows well above baseline to center them with the text height
+                    arrow_metrics = QtGui.QFontMetrics(arrow_font)
+                    arrow_y = stacked_top - arrow_metrics.ascent() // 2
+                    
+                    # Draw thin arrow with glow if 5% effect is active
+                    if glow_color:
+                        painter.setPen(glow_color)
+                        painter.setFont(arrow_font)
+                        for dx in [-1, 0, 1]:
+                            for dy in [-1, 0, 1]:
+                                if dx != 0 or dy != 0:
+                                    painter.drawText(indicator_x + dx, arrow_y + dy, arrow_symbol)
+                        # Draw main thin arrow
+                        painter.setPen(color)
+                        painter.drawText(indicator_x, arrow_y, arrow_symbol)
+                    else:
+                        # No glow, use global glow if enabled
+                        painter.setFont(arrow_font)
+                        painter.setPen(color)
+                        painter.drawText(indicator_x, arrow_y, arrow_symbol)
+                        painter.setFont(small_font)  # Restore small font
+                else:
+                    # Draw indicator with glow if 5% effect is active
+                    if glow_color:
+                        # Draw glow halos for indicator
+                        for dx in [-1, 0, 1]:
+                            for dy in [-1, 0, 1]:
+                                if dx != 0 or dy != 0:
+                                    if indicator_style == "arrows":
+                                        self.draw_rotated_arrow(painter, indicator_x + dx, indicator_y + dy, 
+                                                              indicator_size, triangle_rotation, glow_color)
+                                    else:  # triangles
+                                        self.draw_rotated_triangle(painter, indicator_x + dx, indicator_y + dy, 
+                                                              indicator_size, triangle_rotation, glow_color)
+                    
+                    # Draw main indicator
+                    if indicator_style == "arrows":
+                        self.draw_rotated_arrow(painter, indicator_x, indicator_y, 
+                                              indicator_size, triangle_rotation, color)
+                    else:  # triangles
+                        self.draw_rotated_triangle(painter, indicator_x, indicator_y, 
+                                              indicator_size, triangle_rotation, color)
+                
                 painter.setFont(self.ticker_font)
-                x += 10 + change_width
+                x += 10 + change_width + triangle_width
             painter.setFont(self.ticker_font)
             self.draw_text_with_global_glow(painter, x, tkr_y, sep, QtGui.QColor("#00B3FF"), settings=settings)
             painter.end()
@@ -4246,95 +4515,79 @@ class TickerWindow(QtWidgets.QWidget):
     def apply_bloom_effect(self, painter, width, height, settings):
         """
         Apply bloom/glow effect around bright colors.
-        OPTIMIZED: Uses cached bloom layer that moves with scroll offset.
-        Only regenerates when ticker content changes (prices update, stocks added/removed).
+        DIRECT RENDERING: No caching to avoid rebuild flashing.
+        Draws bloom halos directly each frame.
         """
         # Check if bloom effect is enabled
         if not settings.get("led_bloom_effect", True):
             return
         
-        # Check if we need to rebuild bloom cache
-        # Rebuild if: cache doesn't exist, or offset changed significantly (scrolled one full width)
-        offset_change = abs(self.offset - self.bloom_cache_offset)
-        rebuild_cache = (
-            self.bloom_cache is None or 
-            not self.bloom_cache_valid or
-            offset_change > width  # Scrolled one full screen width
-        )
+        bloom_intensity = settings.get("led_bloom_intensity", 100) / 100.0
         
-        if rebuild_cache:
-            # Create bloom layer that's 3x wider than screen to handle scrolling
-            cache_width = width * 3
-            self.bloom_cache = QtGui.QPixmap(cache_width, height)
-            self.bloom_cache.fill(QtCore.Qt.transparent)
-            
-            cache_painter = QtGui.QPainter(self.bloom_cache)
-            cache_painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
-            cache_painter.setPen(QtCore.Qt.NoPen)
-            
-            bloom_intensity = settings.get("led_bloom_intensity", 100) / 100.0
-            
-            # Draw all bloom halos into the cache (offset by width to center the cache)
-            for area_type, tkr, rect in self.ticker_click_areas:
-                if area_type == 'icon':
-                    continue
-                
-                bloom_radius = max(rect.width(), rect.height()) * 0.6
-                center_x = rect.center().x() + width  # Offset into cache center
-                center_y = rect.center().y()
-                
-                gradient = QtGui.QRadialGradient(center_x, center_y, bloom_radius)
-                
-                # Set bloom color based on area type
-                if area_type == 'price' or area_type == 'change':
-                    price, prev = self.prices.get(tkr, (None, None))
-                    if price is not None and prev is not None:
-                        if price > prev:
-                            gradient.setColorAt(0, QtGui.QColor(0, 255, 64, int(40 * bloom_intensity)))
-                        elif price < prev:
-                            gradient.setColorAt(0, QtGui.QColor(255, 85, 85, int(40 * bloom_intensity)))
-                        else:
-                            gradient.setColorAt(0, QtGui.QColor(255, 255, 255, int(30 * bloom_intensity)))
-                    else:
-                        gradient.setColorAt(0, QtGui.QColor(255, 215, 0, int(30 * bloom_intensity)))
-                elif area_type == 'symbol' or area_type == 'market_label':
-                    gradient.setColorAt(0, QtGui.QColor(0, 179, 255, int(35 * bloom_intensity)))
-                elif area_type == 'market_status':
-                    if tkr == 'OPEN':
-                        gradient.setColorAt(0, QtGui.QColor(0, 255, 64, int(40 * bloom_intensity)))
-                    else:
-                        gradient.setColorAt(0, QtGui.QColor(255, 85, 85, int(40 * bloom_intensity)))
-                elif area_type == 'donate':
-                    gradient.setColorAt(0, QtGui.QColor(255, 200, 255, int(35 * bloom_intensity)))
-                else:
-                    gradient.setColorAt(0, QtGui.QColor(200, 220, 255, int(20 * bloom_intensity)))
-                
-                gradient.setColorAt(1, QtGui.QColor(0, 0, 0, 0))
-                cache_painter.setBrush(QtGui.QBrush(gradient))
-                cache_painter.drawEllipse(int(center_x - bloom_radius), int(center_y - bloom_radius), 
-                                        int(bloom_radius * 2), int(bloom_radius * 2))
-            
-            cache_painter.end()
-            self.bloom_cache_offset = self.offset
-            self.bloom_cache_valid = True
-        
-        # Draw the cached bloom layer, offset by scroll position
-        # Calculate which portion of the 3x-wide cache to display
-        cache_x = int(width + (self.bloom_cache_offset - self.offset) % width)
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
-        painter.drawPixmap(0, 0, self.bloom_cache, cache_x, 0, width, height)
+        painter.setPen(QtCore.Qt.NoPen)
+        
+        # Draw bloom halos directly for each visible element
+        for area_type, tkr, rect in self.ticker_click_areas:
+            if area_type == 'icon':
+                continue
+            
+            # Only draw bloom for elements visible on screen
+            if rect.right() < 0 or rect.left() > width:
+                continue
+            
+            bloom_radius = max(rect.width(), rect.height()) * 0.6
+            center_x = rect.center().x()
+            center_y = rect.center().y()
+            
+            gradient = QtGui.QRadialGradient(center_x, center_y, bloom_radius)
+            
+            # Set bloom color based on area type
+            if area_type == 'price' or area_type == 'change':
+                price, prev = self.prices.get(tkr, (None, None))
+                if price is not None and prev is not None:
+                    if price > prev:
+                        gradient.setColorAt(0, QtGui.QColor(0, 255, 64, int(40 * bloom_intensity)))
+                    elif price < prev:
+                        gradient.setColorAt(0, QtGui.QColor(255, 85, 85, int(40 * bloom_intensity)))
+                    else:
+                        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, int(30 * bloom_intensity)))
+                else:
+                    gradient.setColorAt(0, QtGui.QColor(255, 215, 0, int(30 * bloom_intensity)))
+            elif area_type == 'symbol' or area_type == 'market_label':
+                gradient.setColorAt(0, QtGui.QColor(0, 179, 255, int(35 * bloom_intensity)))
+            elif area_type == 'market_status':
+                if tkr == 'OPEN':
+                    gradient.setColorAt(0, QtGui.QColor(0, 255, 64, int(40 * bloom_intensity)))
+                else:
+                    gradient.setColorAt(0, QtGui.QColor(255, 85, 85, int(40 * bloom_intensity)))
+            elif area_type == 'donate':
+                gradient.setColorAt(0, QtGui.QColor(255, 200, 255, int(35 * bloom_intensity)))
+            else:
+                gradient.setColorAt(0, QtGui.QColor(200, 220, 255, int(20 * bloom_intensity)))
+            
+            gradient.setColorAt(1, QtGui.QColor(0, 0, 0, 0))
+            painter.setBrush(QtGui.QBrush(gradient))
+            painter.drawEllipse(int(center_x - bloom_radius), int(center_y - bloom_radius), 
+                               int(bloom_radius * 2), int(bloom_radius * 2))
+        
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
 
-    def apply_bloom_to_rect(self, painter, rect, width, height, settings=None):
+    def apply_bloom_to_rect(self, painter, rect, width, height, settings=None, bloom_color=None):
         """
         Apply bloom effect to a specific rectangular area.
         Used for loading screen and other special cases.
+        bloom_color: Optional QColor for the bloom (defaults to white if not specified)
         """
         # Get bloom intensity setting
         if settings:
             bloom_intensity = settings.get("led_bloom_intensity", 100) / 100.0
         else:
             bloom_intensity = 1.0
+        
+        # Use specified bloom color or default to white
+        if bloom_color is None:
+            bloom_color = QtGui.QColor(255, 255, 255)
             
         painter.setCompositionMode(QtGui.QPainter.CompositionMode_Plus)
         
@@ -4349,9 +4602,14 @@ class TickerWindow(QtWidgets.QWidget):
         center_alpha = int(39 * bloom_intensity)
         mid_alpha = int(17 * bloom_intensity)
         
-        gradient.setColorAt(0, QtGui.QColor(255, 255, 255, center_alpha))
-        gradient.setColorAt(0.5, QtGui.QColor(255, 255, 255, mid_alpha))
-        gradient.setColorAt(1, QtGui.QColor(255, 255, 255, 0))
+        # Use the bloom color with calculated alpha values
+        bloom_center = QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), center_alpha)
+        bloom_mid = QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), mid_alpha)
+        bloom_edge = QtGui.QColor(bloom_color.red(), bloom_color.green(), bloom_color.blue(), 0)
+        
+        gradient.setColorAt(0, bloom_center)
+        gradient.setColorAt(0.5, bloom_mid)
+        gradient.setColorAt(1, bloom_edge)
         
         painter.setBrush(QtGui.QBrush(gradient))
         painter.setPen(QtCore.Qt.NoPen)
@@ -4557,25 +4815,17 @@ class TickerWindow(QtWidgets.QWidget):
             return
         
         # FPS counter for diagnostic purposes (time-based to avoid refresh-rate dependent stutters)
-        if not hasattr(self, '_fps_counter'):
-            self._fps_counter = 0
-            self._fps_last_calc = 0
-            self._current_fps = 0.0
-            self._current_frame_time = 0.0
         self._fps_counter += 1
         
         # PERF ENHANCEMENT 2: Use cached settings to avoid repeated file I/O
         cached_settings = self.get_cached_settings()
         bloom_enabled = cached_settings.get('show_bloom', True)
         
-        # Always update click areas for bloom effects to follow text during scrolling
-        # Only skip update when bloom effect is disabled to optimize performance
+        # Update click areas when bloom is enabled (needed for bloom positioning)
         update_click_areas = bloom_enabled or self.gl_widget.underMouse()
         
         if update_click_areas:
             self.ticker_click_areas = []
-        elif not hasattr(self, 'ticker_click_areas'):
-            self.ticker_click_areas = []  # Initialize if doesn't exist
         
         painter = QtGui.QPainter(widget)
         # Disable all expensive render hints for maximum performance
@@ -4634,6 +4884,34 @@ class TickerWindow(QtWidgets.QWidget):
             y = (height + metrics.ascent()) // 2
             # Use cached settings for loading text (no need to pass settings since it's only called during startup)
             self.draw_text_with_global_glow(painter, x, y, text, QtGui.QColor("#FFD700"))
+            
+            # Apply visual effects to loading screen (same as normal ticker)
+            if self.gl_widget and self.gl_widget.effects_enabled:
+                # Get settings for effects
+                cached_settings = self.get_cached_settings()
+                
+                # Initialize effect settings cache if needed
+                if not hasattr(self, '_cached_effect_settings'):
+                    settings = get_settings()
+                    self._cached_effect_settings = {
+                        'bloom': settings.get("led_bloom_effect", True),
+                        'ghosting': settings.get("led_ghosting_effect", True),
+                        'glass': settings.get("led_glass_glare", True)
+                    }
+                
+                bloom_enabled = self._cached_effect_settings.get('bloom', True)
+                glass_enabled = self._cached_effect_settings.get('glass', True)
+                
+                # Apply effects to loading screen (skip ghosting - it's a motion effect and requires pixmaps)
+                if bloom_enabled:
+                    # Add a gold bloom effect around the loading text to match the text color
+                    text_rect = QtCore.QRect(x - 20, y - metrics.ascent() - 10, text_width + 40, metrics.height() + 20)
+                    gold_color = QtGui.QColor(255, 215, 0)  # #FFD700
+                    self.apply_bloom_to_rect(painter, text_rect, width, height, cached_settings, bloom_color=gold_color)
+                
+                if glass_enabled:
+                    self.apply_glass_glare_effect(painter, width, height, cached_settings)
+            
             painter.end()
             return
         if not self.ticker_pixmaps:
@@ -4715,40 +4993,18 @@ class TickerWindow(QtWidgets.QWidget):
         supercycle_width = donate_cycle_width + 2 * base_cycle_width
 
         # Calculate frame time delta for smooth frame-independent animation
-        # Use cached time module to avoid import overhead
-        if not hasattr(self, '_time_module'):
-            import time as time_module
-            self._time_module = time_module
-        
         current_time = self._time_module.perf_counter()
         delta_time = current_time - self.last_frame_time
         self.last_frame_time = current_time
         
-        # Disable debug output - printing to console can cause micro-stutters
-        # Uncomment below to re-enable frame time debugging
-        """
-        if not hasattr(self, '_debug_frame_times'):
-            self._debug_frame_times = []
-            self._debug_counter = 0
+        # Cap delta_time to prevent huge jumps on first frame or after long pauses
+        # Maximum 50ms (20 FPS equivalent) to avoid text "rushing" onto screen
+        delta_time = min(delta_time, 0.050)
         
-        self._debug_counter += 1
-        if delta_time > 0:
-            self._debug_frame_times.append(delta_time)
-        
-        # Print frame time stats every 120 frames (every 2 seconds at 60fps)
-        if self._debug_counter % 120 == 0:
-            if self._debug_frame_times:
-                avg_frame_time = sum(self._debug_frame_times) / len(self._debug_frame_times)
-                max_frame_time = max(self._debug_frame_times)
-                min_frame_time = min(self._debug_frame_times)
-                # Count frames over 20ms (likely causing visible stutter)
-                slow_frames = sum(1 for t in self._debug_frame_times if t > 0.020)
-                print(f"[FRAME TIME] Avg: {avg_frame_time*1000:.2f}ms, Min: {min_frame_time*1000:.2f}ms, Max: {max_frame_time*1000:.2f}ms, Slow frames (>20ms): {slow_frames}/120")
-            self._debug_frame_times = []
-        """
+        # Frame time debug logging disabled - printing causes micro-stutters
         
         # FPS counter - calculate once per second (time-based, not frame-based)
-        # This prevents stutter on high-refresh displays where "every 60 frames" happens too frequently
+        # Simplified to avoid any periodic operations that could cause stuttering
         if current_time - self._fps_last_calc >= 1.0:
             if self._fps_last_calc > 0:
                 elapsed = current_time - self._fps_last_calc
@@ -4761,32 +5017,6 @@ class TickerWindow(QtWidgets.QWidget):
                 # Only print to console if overlay is disabled
                 if not self.show_fps_overlay:
                     print(f"[FPS] Current: {fps:.1f} FPS | Frame time: {self._current_frame_time:.1f}ms avg")
-                
-                # Initialize adaptive quality state
-                if not hasattr(self, '_effects_disabled'):
-                    self._effects_disabled = False
-                    self._high_fps_streak = 0
-                
-                # ADAPTIVE QUALITY: Disable visual effects if FPS drops below 55
-                # Require SUSTAINED high FPS (3+ seconds at 59+ FPS) before re-enabling
-                if fps < 55:
-                    if not self._effects_disabled:
-                        if not self.show_fps_overlay:
-                            print(f"[ADAPTIVE] FPS dropped to {fps:.1f} - disabling visual effects for smooth scrolling")
-                        self._effects_disabled = True
-                    self._high_fps_streak = 0  # Reset streak counter
-                elif fps >= 59:
-                    # High FPS detected - increment streak
-                    self._high_fps_streak += 1
-                    if self._effects_disabled and self._high_fps_streak >= 3:
-                        # Sustained 3+ seconds of 59+ FPS - safe to re-enable effects
-                        if not self.show_fps_overlay:
-                            print(f"[ADAPTIVE] FPS sustained at {fps:.1f} for {self._high_fps_streak}s - re-enabling visual effects")
-                        self._effects_disabled = False
-                        self._high_fps_streak = 0
-                else:
-                    # FPS in middle range (55-59) - maintain current state but don't count as streak
-                    self._high_fps_streak = 0
             
             # Reset counter and timer for next measurement period
             self._fps_last_calc = current_time
@@ -4794,21 +5024,9 @@ class TickerWindow(QtWidgets.QWidget):
         
         # Only scroll if not paused (mouse not hovering)
         if not self.is_paused:
-            # Smooth frame time using exponential moving average to reduce jitter-induced stutter
-            # This prevents visible "jerks" when Windows timer varies between frames
-            if not hasattr(self, '_smoothed_delta_time'):
-                self._smoothed_delta_time = delta_time
-            else:
-                # Moderate smoothing (alpha=0.3) to balance responsiveness and smoothness
-                alpha = 0.3
-                self._smoothed_delta_time = alpha * delta_time + (1 - alpha) * self._smoothed_delta_time
-            
-            # Use smoothed delta time for scroll calculation
-            time_multiplier = min(self._smoothed_delta_time / self.target_frame_interval, 3.0)
-            
-            # Use consistent time-compensated scrolling for all speeds
-            # This ensures uniform speed progression regardless of FPS
-            actual_scroll = self.scroll_speed * time_multiplier
+            # Time-based scrolling: pixels per second, not per frame
+            # This keeps speed consistent regardless of frame rate
+            actual_scroll = self.scroll_speed * delta_time * 60.0  # Multiply by 60 to maintain same numeric scale
 
             # Only update scroll position if not paused
             if not self.paused:
@@ -4841,18 +5059,9 @@ class TickerWindow(QtWidgets.QWidget):
                 print(f"[EFFECTS INIT] Cache initialized - bloom={self._cached_effect_settings['bloom']}, "
                       f"ghosting={self._cached_effect_settings['ghosting']}, glass={self._cached_effect_settings['glass']}")
             
-            # Refresh settings cache every 5 seconds (not every frame!)
-            import time as time_module
-            current_time = time_module.time()
-            if current_time - self._settings_cache_time > 5.0:
-                settings = get_settings()
-                self._cached_effect_settings = {
-                    'bloom': settings.get("led_bloom_effect", True),
-                    'ghosting': settings.get("led_ghosting_effect", True),
-                    'glass': settings.get("led_glass_glare", True)
-                }
-                self._cached_settings = settings  # Store full settings for effect functions
-                self._settings_cache_time = current_time
+            # REMOVED: Periodic settings refresh - causes 5-second glitch
+            # Settings are now only loaded on startup and when explicitly changed via settings dialog
+            # This eliminates periodic frame drops every 5 seconds
             
             # Use cached settings
             cached_settings = self._cached_settings if hasattr(self, '_cached_settings') else get_settings()
@@ -5261,6 +5470,50 @@ class ManageStocksDialog(QtWidgets.QDialog):
         remove_btn.clicked.connect(self.remove_selected)
         layout.addWidget(remove_btn)
         
+        # Load/Save buttons (inline)
+        file_layout = QtWidgets.QHBoxLayout()
+        file_layout.setSpacing(8)
+        
+        load_btn = QtWidgets.QPushButton("📂 Load from File...")
+        load_btn.setStyleSheet("""
+            QPushButton {
+                background: #2a2d35;
+                border: 1px solid #3a3d45;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #3a3d45;
+                border: 1px solid #00b3ff;
+            }
+        """)
+        load_btn.clicked.connect(self.load_from_file)
+        
+        save_file_btn = QtWidgets.QPushButton("💾 Save to File...")
+        save_file_btn.setStyleSheet("""
+            QPushButton {
+                background: #2a2d35;
+                border: 1px solid #3a3d45;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #3a3d45;
+                border: 1px solid #00b3ff;
+            }
+        """)
+        save_file_btn.clicked.connect(self.save_to_file)
+        
+        file_layout.addWidget(load_btn)
+        file_layout.addWidget(save_file_btn)
+        layout.addLayout(file_layout)
+        
         # Separator
         separator = QtWidgets.QFrame()
         separator.setFrameShape(QtWidgets.QFrame.HLine)
@@ -5351,6 +5604,76 @@ class ManageStocksDialog(QtWidgets.QDialog):
             del self.stocks[idx]
         self.sort_and_refresh()
         self.refresh_list_widget()
+
+    def load_from_file(self):
+        """Load stocks list from a JSON file"""
+        file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Load Stocks from File",
+            APPDATA_DIR,
+            "JSON Files (*.json);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'r') as f:
+                    loaded_stocks = json.load(f)
+                
+                # Validate the loaded data
+                if isinstance(loaded_stocks, list):
+                    self.stocks = loaded_stocks
+                    self.sort_and_refresh()
+                    self.refresh_list_widget()
+                    
+                    # Update checkboxes for major indices
+                    stock_symbols = [s[0] for s in self.stocks]
+                    self.sp500_checkbox.setChecked('^GSPC' in stock_symbols)
+                    self.nasdaq_checkbox.setChecked('^IXIC' in stock_symbols)
+                    self.dji_checkbox.setChecked('^DJI' in stock_symbols)
+                    
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "Success",
+                        f"Successfully loaded {len(self.stocks)} stocks from:\n{file_path}"
+                    )
+                else:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Invalid Format",
+                        "The selected file does not contain a valid stocks list."
+                    )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Loading File",
+                    f"Failed to load stocks from file:\n{str(e)}"
+                )
+
+    def save_to_file(self):
+        """Save current stocks list to a JSON file"""
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save Stocks to File",
+            os.path.join(APPDATA_DIR, "TCKR.Tickers.json"),
+            "JSON Files (*.json);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    json.dump(self.stocks, f, indent=2)
+                
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Successfully saved {len(self.stocks)} stocks to:\n{file_path}"
+                )
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Error Saving File",
+                    f"Failed to save stocks to file:\n{str(e)}"
+                )
 
     def save_and_close(self):
         # Handle major indices checkboxes
@@ -5516,7 +5839,7 @@ Examples:
     # Create QApplication IMMEDIATELY to show splash screen
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
-    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseOpenGLES)
+    # Use Desktop OpenGL for better performance (don't set both OpenGLES and DesktopOpenGL!)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseDesktopOpenGL)
 
     app = QtWidgets.QApplication(sys.argv)
