@@ -66,13 +66,13 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
 
 2. **Install Dependencies**
 
-    ```sh
+    ```powershell
     pip install -r requirements.txt
     ```
 
 3. **Run the Application**
 
-    ```sh
+    ```powershell
     python TCKR/TCKR.py
     ```
 
@@ -80,7 +80,7 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
 
 1. **Run PyInstaller in Windows Powershell**
 
-    ```sh
+    ```powershell
     python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
     --add-data "TCKR.ico;." `
     --add-data "SubwayTicker.ttf;." `
@@ -102,7 +102,7 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
 
 2. **Launch the TCKR.exe**
 
-    ```sh
+    ```powershell
     .\dist\TCKR.exe
     ```
 
