@@ -1,0 +1,240 @@
+TCKR Changelog - February 12, 2026
+v1.0.2026.0212.1214
+
+  Changes (2026-02-12):
+  - Historical Mini-Sparklines:
+    * Added toggleable mini-sparklines in Settings → Appearance (`show_sparklines`).
+    * Added selectable sparkline range (`sparkline_period`) with `1D` and `5D` options.
+    * Sparklines render inline next to each symbol in ticker rows.
+
+  - Data Fetch / Caching:
+    * Added async sparkline fetch pipeline using Yahoo chart data (non-blocking background threads).
+    * Added per-symbol cache with TTL to reduce network calls and preserve smooth rendering:
+      - `1D` cache lifetime: 10 minutes
+      - `5D` cache lifetime: 30 minutes
+    * Added in-flight deduplication to prevent duplicate concurrent requests for the same symbol/period/size.
+    * Added lightweight placeholder sparkline while data is loading or when fetch fails.
+
+  - Runtime Apply Behavior:
+    * Sparkline settings now apply immediately without restart from the Settings dialog.
+    * Changing sparkline toggle/range clears sparkline cache and rebuilds ticker pixmaps.
+
+  - Performance Guardrails:
+    * Feature is OFF by default to preserve baseline performance.
+    * Incremental per-symbol pixmap rebuild path falls back to full rebuild when sparklines are enabled to avoid geometry mismatch and stutter.
+
+  Latest Updates (2026-02-12):
+  - Settings / API Key UX:
+    * Added TEST buttons for both primary and secondary Finnhub API keys in Settings.
+    * Added inline temporary status labels for each TEST button (Testing, OK, failure states) with auto-clear.
+
+  - Price Indicator Visuals:
+    * Updated triangle indicator to a right-angle triangle where the right-angle vertex is the directional tip.
+    * Tightened indicator horizontal spacing relative to change text for better visual grouping.
+
+  - Sparkline Layout Controls:
+    * Added `sparkline_position` setting with `Left of Price` / `Right of Price` options.
+    * Setting persists and applies live without restart.
+    * Implemented in both full rebuild and incremental per-symbol rebuild paths.
+
+  - Sparkline Separation Fixes:
+    * Reworked change/indicator reserved width to be dynamic (style/size-aware) so right-side sparklines do not overlap long change values.
+    * Ensures consistent separation even when change text grows to larger digit counts.
+
+  - Stale Data Display Behavior:
+    * Temporary fetch failures no longer immediately force GOLD when prior valid data exists.
+    * Last valid price/change context is retained while data is stale.
+    * Added progressive stale-data dimming based on consecutive failed fetches.
+    * Fading now applies consistently to price, change text, and price indicator (including indicator glow).
+    * GOLD remains for initial unavailable states (initial price unavailable or initial change indeterminate).
+
+  - Settings Layout Polish:
+    * Reworked Appearance rows into a more consistent grid with fixed-width right-aligned labels.
+    * Standardized dropdown widths and aligned paired controls for cleaner vertical rhythm.
+    * Normalized mixed-row spacing and aligned checkbox-led rows to match the same field column.
+
+  - Visual Effects Preview Improvements:
+    * Moved Preview row to the bottom of the Visual Effects section.
+    * Upgraded preview to a true ticker-style sample including symbol, price, change amount, and percent.
+    * Preview now reflects selected Price Indicator style (Arrows/Thin Arrows/Triangles).
+    * Preview now reflects sparkline visibility, selected period (1D/5D), and sparkline position (left/right).
+    * Preview now reflects LED Icon Matrix, Glass Cover with Glare, and Subtle Text Glow toggles.
+    * Added live preview refresh on all related setting changes (effects toggles/intensities + indicator/sparkline controls).
+
+  - Settings Input Clarity:
+    * Converted value spinboxes to numeric-only display by removing inline unit suffixes.
+    * Moved unit descriptors to regular text labels to the right of each input (e.g., sec, px, px/frame, %).
+    * This applies across Appearance and Visual Effects numeric fields for consistent readability.
+
+
+TCKR Changelog - January 26, 2026
+v1.0.2026.0126.1735
+
+  Changes (2026-01-26):
+  - Visual Effects / Settings:
+    * Reworked bloom intensity scaling to a 0-100 range with nonlinear response (`calculate_bloom_factor`) for subtler low values and stronger high-end glow.
+    * Updated default bloom intensity from 200 to 60 for more balanced visuals.
+    * Added new `led_ghost_intensity` setting (single control for ghost opacity + tint strength).
+    * Added live effects preview widget in Settings with real-time Bloom/Ghosting toggles and intensity updates.
+
+  - Ghosting Render Fixes:
+    * Introduced cached tinted ghost pixmaps (`ticker_ghost_pixmaps`) for stock/market/donate elements.
+    * Moved ghost rendering to an early pass between background and main content for proper layering visibility.
+    * Ghost offsets now scale with actual per-frame scroll movement (`_last_actual_scroll`) for smoother trailing.
+    * Ghosting now respects user preference even while paused (no forced disable on pause/hover).
+
+  - Instant Apply / Runtime Behavior:
+    * Improved visual-effect cache refresh/update path for immediate on-screen changes after Apply.
+    * Primary ticker speed updates now apply only to primary windows.
+    * Second ticker speed updates now apply only to secondary windows (with immediate redraw).
+    * Rebuild triggers tightened when ghost settings change to ensure updated ghost pixmaps are regenerated.
+
+  - Bloom Reliability Improvements:
+    * Added fallback click-area estimation when area templates are not yet available so bloom can still render.
+    * Increased bloom halo alpha levels for price/symbol/market/donate elements for stronger, clearer effect.
+
+  - Startup Visibility Hardening:
+    * Added splash-window visibility probe with opaque fallback if translucent show fails on some systems.
+    * Added ticker-window visibility probe with similar fallback logic after initial show.
+
+  - Diagnostics:
+    * Added targeted ghost debug instrumentation/logging and optional visual debug overlay to troubleshoot missing ghost trails.
+
+
+TCKR Changelog - January 23, 2026
+v1.0.2026.0123.2038
+
+  Changes (2026-01-23):
+  - AppBar / DPI & Multi-Ticker Reservation:
+    * `set_appbar(...)` now treats the `height` argument as a desired PHYSICAL pixel value and ensures the requested reservation is at least the actual window physical height.
+    * Primary AppBar registration computes the combined logical height of all managed ticker windows, converts it to physical pixels using the screen `devicePixelRatioF()`, and requests that combined physical height so both tickers' desktop/work-area space is reserved.
+    * `move_to_selected_screen()` re-registration now converts logical ticker height → physical pixels before calling `set_appbar`.
+    * Improved debug logging for AppBar conversions and reservation results; added retry handling when Windows limits reservation.
+
+  - Misc UI fixes in this build:
+    * Ensures AppBar reservation avoids gaps between multiple ticker instances on high-DPI displays.
+    * Safer handling of tray/ticker window references in multi-window setups (no AttributeError on click).
+
+
+
+TCKR Changelog - January 23, 2026
+v1.0.2026.0123.2005
+
+Changes (2026-01-23):
+- Forced Fetch Improvements:
+  * `fetch_all_stock_prices_with_429(...)` now accepts `force=True` to bypass cached results.
+  * Manual "Fetch Prices Now" uses `force=True` so it requests fresh API data even if cache is recent.
+  * Logs a clear message when cached results are bypassed: "[API CACHE] Bypassing cached results due to force=True (...s)".
+
+- Secondary Ticker Sync / Inplace Update:
+  * Primary ticker now distributes inplace-fetched prices to all secondary tickers immediately.
+  * Secondary tickers receive `_pending_price_update` and schedule deferred processing to update displays.
+
+- Tray / UI Fixes:
+  * Fixed tray activation crash by using `primary_ticker` or falling back to the first `ticker_windows` entry.
+  * Resolved AttributeError when clicking the tray icon in multi-window setups.
+
+- Misc:
+  * Minor logging and robustness improvements around coordinated fetch and cache handling.
+
+
+
+TCKR Changelog - January 21, 2026
+v1.0.2026.0121.1358
+
+    Changes (2026-01-21):
+    - WebSocket subscription robustness:
+      * Added `queued_subscriptions` to buffer subscribe requests when the socket exists but isn't connected.
+      * Flushed queued subscriptions from the websocket `on_open` handler so subscriptions are reliably sent from the connection thread.
+      * `subscribe_symbols` now enqueues symbols when not connected (avoids "socket is already closed" errors) and attempts `connect()` if no socket exists.
+      * When connected, `subscribe_symbols` computes a diff and sends only required `subscribe` / `unsubscribe` messages (reduces churn and network traffic).
+      * Enhanced send error logging for per-symbol failures (helps diagnose closed/failed sockets).
+      * Short Qt single-shot retry remains for transient startup races; overall flow now uses an explicit queue + flush on open.
+
+    - Incremental pixmap updates & throttling:
+      * Implemented per-symbol incremental pixmap rebuilds to avoid full rebuilds on each price change.
+      * Added per-`TickerWindow` pending queue + dedupe set and an incremental rebuild `QTimer` that processes a small batch per tick.
+      * Tunable settings: `websocket_incremental_interval_ms`, `websocket_incremental_max_per_tick` to balance smoothness vs latency.
+      * `queue_incremental_pixmap_updates(...)` is used to schedule work and `build_ticker_pixmaps_for_symbols(...)` performs the partial rebuilds.
+
+    - Secondary ticker data sync fix:
+      * Fixed `N/A` price displays in secondary ticker windows by normalizing `ticker.stocks` (`[s[0] for s in load_stocks()]`) before assigning `ticker.prices`.
+      * Ensures keys/ordering match across tickers so incremental updates and lookups return values instead of `None`.
+
+    - Misc / CI:
+      * Ran static syntax checks after edits — no syntax errors found.
+
+    Notes:
+    - These changes address startup subscription races and eliminate noisy "socket is already closed" errors seen when subscribing before the connection handshake completes.
+    - The incremental pixmap approach drastically reduces render-time stutter by limiting expensive rebuilds to only affected symbols and by throttling work across frames.
+    - WebSocket Zero-Interruption Mode: Completely eliminated jitter from real-time price updates
+      * Removed batch processing timer that was causing micro-interruptions every 150ms
+      * WebSocket messages now silently accumulate in buffer with zero CPU impact during scrolling
+      * Single 10-second timer processes entire buffer + rebuilds visuals in one operation
+      * VeryCoarseTimer priority ensures processing only happens during idle time
+      * Result: Butter-smooth 60 FPS scrolling with price updates every 10 seconds
+      * Trade-off: 10-second update latency accepted for maximum smoothness
+    - WebSocket Message Batching & Throttling: Optimized real-time data processing
+      * Configurable batch interval (default 150ms) to group incoming messages
+      * Per-symbol rate limiting (default 100ms minimum between updates)
+      * Change threshold filtering (default 0.1% minimum price change required)
+      * Reduces unnecessary visual rebuilds while maintaining price accuracy
+      * Settings: websocket_batch_interval, websocket_min_update_interval, websocket_change_threshold
+    - WebSocket Thread Safety: Fixed QTimer threading issues
+      * Moved QTimer creation from WebSocket thread to Qt main thread
+      * Prevents "Timers can only be used with threads started with QThread" errors
+      * WebSocket now only populates buffer, main thread handles all Qt operations
+
+
+
+TCKR Changelog - January 20, 2026
+v1.0.2026.0120.1512
+
+  Changes:
+    * Enable/disable second ticker in Settings → Appearance
+    * Customizable scroll speed for second ticker
+    * Optional separate stock list file for second ticker (uses main stocks if not specified)
+    * Desktop space automatically reserved for both tickers (double height appbar)
+    * Second ticker inherits all other settings from main ticker
+    * Shares websocket connection with main ticker for real-time updates
+    * Automatic connection during market open hours with intelligent reconnection
+    * Real-time price updates with minimal latency (<1 second)
+    * Automatic disconnection after market close to reduce costs
+    * Cost monitoring with warnings when exceeding Finnhub free tier limits (50 symbols)
+    * Excludes Yahoo Finance indices (^SPX, etc.) that don't support websockets
+    * ANSI color codes with Windows terminal support (virtual terminal processing)
+    * Automatic tag detection and coloring ([WEBSOCKET], [API], [PERF], etc.)
+    * Color-coded categories: Blue for API, Green for WebSocket, Yellow for Performance, etc.
+    * Cross-platform compatibility with fallback for unsupported terminals
+    * Tray menu option "📊 Show WebSocket Status" for real-time connection info
+    * Displays connection state, subscribed symbols, message counts, and uptime
+    * Automatic status logging with periodic summaries during market hours
+    * Connection statistics tracking (messages received, price updates processed)
+    * Visual indicators for connection health and data flow
+    * Load/Save dialogs default to APPDATA directory
+    * Supports importing/exporting stock lists as JSON
+    * Bypasses the scheduled update timer
+    * Resets countdown after manual fetch
+    * Overrides the backoff waiting period
+    * Loading screen now matches ticker appearance from first frame
+    * Gold bloom effect matches the loading text color
+    * 0° (up) = strong positive change (≥1%)
+    * 45° (up-right) = small positive change (<1%)
+    * 90° (right) = no change (<0.01%)
+    * 135° (down-right) = small negative change (<1%)
+    * 180° (down) = strong negative change (≥1%)
+    * Triangles rotate smoothly to communicate strength of price movements
+    * Size optimized at 25px with proper positioning and centering
+    * Equilateral triangle proportions with slightly narrower base (0.75 ratio)
+    * Triangles: Solid filled triangles (default)
+    * Arrows: Thick arrow shapes with pointed heads and rectangular shafts
+    * Thin Arrows: Unicode arrow symbols (↑ ↗ → ↘ ↓) for minimal appearance
+    * All styles rotate dynamically based on price change magnitude
+    * Style changes apply instantly without requiring restart
+ 
+   New Features:
+   - Price Fetch Optimization: Prevented duplicate API calls when both tickers use same stocks
+     * Secondary ticker's update timer is disabled at creation when it shares stocks with primary ticker
+     * Added API response caching as additional safeguard against any remaining duplicate fetches
+
+

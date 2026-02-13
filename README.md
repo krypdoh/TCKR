@@ -1,4 +1,5 @@
-# TCKR - Stock Ticker for Windows
+# TCKR — Real-Time Stock Ticker for Windows
+
 ![](https://github.com/krypdoh/TCKR/blob/main/docs/TCKR-screenshot0.png)
 
 <img src="https://i.imgur.com/ORjiXB2.gif">
@@ -10,55 +11,82 @@
 
 ## Description
 
-TCKR is a customizable, always-on-top ticker application for Windows that displays real-time* stock prices with visual alerts for significant price movements.  
-It features a modern LED-style UI with glow effects for stocks with ≥5% changes, multi-monitor support, and a system tray icon for quick access.  
-The ticker fetches stock prices from Finnhub, supports user configuration, and allows management of displayed tickers.  
-Users can adjust appearance, scroll speed, transparency, display screen, update intervals, and more via a settings dialog or command-line arguments.
+TCKR is a customizable, high-performance real-time stock ticker for Windows that displays scrolling prices, logos, and market data as a persistent AppBar. Built with PyQt5 and featuring rich LED-style visual effects, it streams live prices via Finnhub WebSocket with REST API fallback, supports dual API keys with load balancing, and offers an optional second ticker bar with its own stock list and scroll speed.
 
-** Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.
+*Prices may be delayed depending on your Finnhub account. For educational and entertainment purposes only.*
+
 ---
 
-## 🔑 Key Features
+## Key Features
 
-- Real-time stock and price display (Finnhub APIs)
-- **Visual alerts**: Glowing effect for stocks with ≥5% price changes (lasts 5 minutes)
-- Customizable appearance: height, transparency, glass effect, scroll speed
-- Multi-monitor and system tray support
-- Manage tickers (add, remove, edit) via GUI
-- Command-line options for automation and scripting
-- Persistent settings and ticker list stored in user AppData
-- Windows AppBar integration for proper screen space reservation
+### Core Ticker
+- **Real-time price streaming** via Finnhub WebSocket + REST API fallback
+- **Dual API key support** with automatic load balancing
+- **API key validation** — built-in TEST buttons verify keys with inline status feedback
+- **Dual ticker bars** — optional second ticker with independent stock list and scroll speed
+- **Persistent AppBar** integration — docks to screen top, reserves desktop space
+- **Multi-monitor support** — choose which display to dock the ticker on
+- **Crypto support** via CoinGecko integration
 
-## ✅ What’s in the release
-- Faster perceived startup through progressive loading.
-- Smarter update intervals to reduce unnecessary API calls off‑hours.
-- Icon caching with LRU eviction to limit memory growth.
-- Settings caching to reduce repeated disk I/O during rendering.
-- Optional enhancements: pixmap memory pooling and JIT acceleration (Numba) when available.
+### Visual & Display
+- **Smooth scrolling** with configurable scroll speed and ticker height
+- **Historical mini-sparklines** — toggleable 1D/5D trend charts next to each symbol
+  - Async fetch from Yahoo Finance with smart caching and TTL
+  - Configurable placement: left or right of price/change
+- **Price indicators** — multiple styles: right-angle triangles, thick arrows, thin arrows
+  - Rotate dynamically based on price change magnitude
+- **LED bloom/glow effect** with adjustable intensity (non-linear scaling)
+- **Motion blur / ghosting** with adjustable intensity
+- **LED icon matrix overlay** for retro CRT-style look
+- **Glass cover with glare** for depth effect
+- **Subtle text glow** for enhanced readability
+- **Live visual effects preview** in Settings — true ticker-style sample showing all active effects, indicator style, sparkline position, and effect toggles
+- **Stale data handling** — retains last valid price and progressively fades price, change text, and indicator instead of jumping to gold; gold reserved for initial N/A states only
 
-## 🎯 Expected impact (qualified)
-- Startup (perceived): Up to ~40–60% faster perceived startup when progressive loading is used; actual wall‑time gains depend on deferred modules and system load.
-- Memory: Significant peak memory reductions are expected on icon‑heavy or long‑running sessions when caching and periodic cleanup are active. On light workloads the effect may be negligible.
-- Network/API: Lower connection overhead in high‑frequency request scenarios due to persistent HTTP sessions; absolute improvement depends on network conditions.
-- Rendering: Smoother rendering where paint I/O was previously the bottleneck; exact gains vary by platform and GPU.
-- File I/O: Repeated settings file reads have been removed from paint loops.
+### Settings & UX
+- **Polished two-column grid layout** across API Keys, Appearance, and Visual Effects sections
+- **Numeric-only input fields** with unit labels (sec, px, px/frame, %) on the right
+- **Live apply** — most settings take effect immediately without restart
+- **Modeless dialogs** — Settings, Manage Stocks, and About windows don't block the ticker
+- **System tray integration** with right-click menu for quick access
+- **Configurable transparency** (0–100%)
+- **Sound on update** toggle
+
+### Performance
+- **Incremental pixmap rebuilds** — only changed symbols are re-rendered
+- **Batched WebSocket visual refresh** with configurable interval
+- **Sparkline fetch deduplication** and in-flight tracking
+- **Icon caching with LRU eviction** to limit memory growth
+- **Settings caching** to reduce repeated disk I/O during rendering
+- **Progressive loading** for faster perceived startup
+- Optional enhancements: pixmap memory pooling and JIT acceleration (Numba) when available
+
+### Network
+- **Proxy support** (HTTP/HTTPS)
+- **Custom certificate** support (.pem)
+- **Automatic session management** with retry/timeout handling
+- **Data source failover** — graceful handling of API unavailability
+
 ---
 
 ## Requirements
 
-Currently Used:
+**Python packages:**
 
-✅ PyQt5 - Core GUI framework (imported at line 23-24)
-✅ requests - HTTP requests for API calls (line 19)
-✅ numpy - Used conditionally when USE_OPT=True for performance optimizations (lines 3594, 3690, 4097)
-✅ pandas & pandas-market-calendars - Market hours detection (lines 461-462, function at line 456)
-✅ numba - Optional JIT compilation via ticker_utils_numba.py module (loaded at line 609)
+| Package | Purpose |
+|---|---|
+| PyQt5 | Core GUI framework |
+| requests | HTTP requests for API calls |
+| websocket-client | Finnhub WebSocket streaming |
+| numpy | Performance optimizations (optional) |
+| pandas, pandas-market-calendars | Market hours detection |
+| numba | Optional JIT compilation |
+| pip-system-certs | System certificate trust |
 
-Also Used (not in requirements.txt):
+**Standard library:** sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures, argparse, shutil, signal, atexit  
+**Custom modules:** modern_gui_styles.py, ticker_utils_numba.py (optional), memory_pool.py (optional)
 
-Standard library: sys, os, json, time, datetime, webbrowser, ctypes, concurrent.futures, argparse, shutil, signal, atexit
-Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_pool.py (optional)
-
+---
 
 ## Installation & Usage
 
@@ -73,15 +101,17 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
 3. **Run the Application**
 
     ```powershell
-    python TCKR/TCKR.py
+    python TCKR.py
     ```
 
-## Building the Application with PyInstaller
+On first launch, enter your [Finnhub API key](https://finnhub.io/) in the Settings dialog. Use the **TEST** button to verify connectivity before saving.
 
-1. **Run PyInstaller in Windows Powershell**
+---
 
-    ```powershell
-    python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
+## Building with PyInstaller
+
+```powershell
+python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
     --add-data "TCKR.ico;." `
     --add-data "SubwayTicker.ttf;." `
     --add-data "notify.wav;." `
@@ -98,25 +128,17 @@ Custom modules: modern_gui_styles.py, ticker_utils_numba.py (optional), memory_p
     --hidden-import="numba.np.ufunc" `
     --hidden-import="llvmlite.binding" `
     TCKR.py
-    ```
+```
 
-2. **Launch the TCKR.exe**
-
-    ```powershell
-    .\dist\TCKR.exe
-    ```
-
-You will need to enter in your [Finnhub API key](https://finnhub.io/) in Settings if you have stock tickers in Manage Stocks.
+Then launch: `.\dist\TCKR.exe`
 
 ---
 
 ## Command-Line Options
 
-You can customize TCKR at launch with these options:
 ```sh
 -a, --api                   Finnhub API key
--b, --backup-settings       Restore settings from backup and save as current
--̶c̶, -̶-̶c̶r̶y̶p̶t̶o̶-̶a̶p̶i̶            C̶o̶i̶n̶G̶e̶c̶k̶o̶ A̶P̶I̶ k̶e̶y̶
+-b, --backup-settings       Restore settings from backup
 -ht, --height               Ticker height in pixels
 -n, --no-splash             Disable splash screen on startup
 -s, --speed                 Ticker scroll speed
@@ -132,16 +154,41 @@ TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 ---
 
-## Settings & Customization
+## Settings Reference
 
-- Right-click the ticker or use the system tray icon to access settings
-- **Manage tickers**: Add or remove stocks/crypto symbols
-- **Visual customization**: Adjust ticker height, transparency, scroll speed
-- **Display options**: Choose which monitor to display on (multi-monitor support)
-- **Update interval**: Configure how often prices are refreshed (default: 5 minutes)
-- **Network settings**: Configure proxy and SSL certificate options if needed
-- **Glow alerts**: Automatic visual highlighting for stocks with ≥5% price changes (5-minute duration)
-- Settings and ticker lists are automatically saved in your user %AppData%/TCKR folder
+All settings are managed via the Settings dialog and stored in `tckr_settings.json`:
+
+| Setting | Description | Default |
+|---|---|---|
+| Primary Key | Finnhub API key for price data | — |
+| Secondary Key | Optional second key for load balancing | — |
+| Update Interval | REST API poll frequency | 300 sec |
+| WS Visual Refresh | WebSocket display refresh rate (0 = smooth) | 0 sec |
+| Display | Target monitor for ticker bar | Display 1 |
+| Scroll Speed | Ticker scroll rate | 2 px/frame |
+| Height | Ticker bar height | 60 px |
+| Transparency | Window transparency | 100% |
+| Price Indicator | Triangle / Arrow (thick/thin) style | Triangles |
+| Sparklines | Enable 1D/5D historical trend charts | Off |
+| Sparkline Range | 1D or 5D history window | 1D |
+| Sparkline Position | Left or Right of price/change | Left |
+| Second Ticker | Enable second independent ticker bar | Off |
+| Bloom Effect | LED glow behind text/icons | On (60%) |
+| Ghosting | Motion blur trailing effect | On (50%) |
+| LED Matrix | Retro LED dot pattern overlay | On |
+| Glass Cover | Glare/depth overlay | On |
+| Text Glow | Subtle glow on text rendering | On |
+| Sound | Play notification on price update | On |
+
+---
+
+## Data Sources
+
+| Provider | Purpose |
+|---|---|
+| [Finnhub.io](https://finnhub.io) | Real-time stock quotes, WebSocket streaming |
+| [Yahoo Finance](https://finance.yahoo.com) | Historical sparkline data (1D/5D) |
+| [CoinGecko](https://coingecko.com) | Cryptocurrency prices |
 
 ---
 
@@ -155,13 +202,9 @@ TCKR.py -t BTC,ETH,MSFT,T -s 3 -ht 80 -u 120
 
 ---
 
-
-
----
-
 ## License
 
-This project is licensed under the GNU AGPLv3 License.
+This project is licensed under the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0.html).
 
 ---
 
@@ -170,3 +213,5 @@ This project is licensed under the GNU AGPLv3 License.
 If you find TCKR useful, consider [donating via PayPal](https://paypal.me/paypaulc).
 
 ---
+
+*TCKR v1.0.2026.0212 — February 12, 2026*
