@@ -1394,6 +1394,18 @@ def ensure_finnhub_api_key(parent=None):
     colored_print("[API KEY] Dialog cancelled or no key entered - continuing without API key")
     return None
 
+
+def normalize_proxy_url(proxy_value):
+    if not proxy_value:
+        return ""
+    proxy_value = proxy_value.strip()
+    if not proxy_value:
+        return ""
+    if not proxy_value.lower().startswith(("http://", "https://")):
+        proxy_value = f"http://{proxy_value}"
+    return proxy_value
+
+
 def fetch_yahoo_quote(ticker):
     """
     Fetch quote data from Yahoo Finance for indices.
@@ -1407,10 +1419,11 @@ def fetch_yahoo_quote(ticker):
         settings = get_settings()
         proxies = None
         verify = True
-        if settings.get("use_proxy") and settings.get("proxy"):
+        proxy_value = normalize_proxy_url(settings.get("proxy", ""))
+        if settings.get("use_proxy") and proxy_value:
             proxies = {
-                "http": settings["proxy"],
-                "https": settings["proxy"]
+                "http": proxy_value,
+                "https": proxy_value
             }
         if settings.get("use_cert") and settings.get("cert_file"):
             verify = settings["cert_file"]
@@ -1450,10 +1463,11 @@ def fetch_finnhub_quote(ticker, api_key):
     settings = get_settings()
     proxies = None
     verify = True
-    if settings.get("use_proxy") and settings.get("proxy"):
+    proxy_value = normalize_proxy_url(settings.get("proxy", ""))
+    if settings.get("use_proxy") and proxy_value:
         proxies = {
-            "http": settings["proxy"],
-            "https": settings["proxy"]
+            "http": proxy_value,
+            "https": proxy_value
         }
     if settings.get("use_cert") and settings.get("cert_file"):
         verify = settings["cert_file"]
@@ -1615,10 +1629,11 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None, force=Fals
         settings = get_settings()
         proxies = None
         verify = True
-        if settings.get("use_proxy") and settings.get("proxy"):
+        proxy_value = normalize_proxy_url(settings.get("proxy", ""))
+        if settings.get("use_proxy") and proxy_value:
             proxies = {
-                "http": settings["proxy"],
-                "https": settings["proxy"]
+                "http": proxy_value,
+                "https": proxy_value
             }
         if settings.get("use_cert") and settings.get("cert_file"):
             verify = settings["cert_file"]
@@ -1706,17 +1721,10 @@ def fetch_all_stock_prices_with_429(tickers, api_key, api_key_2=None, force=Fals
         del fetch_all_stock_prices_with_429._cache[key]
 
     return prices, had_429
-
-
 def build_websocket_proxy_kwargs(settings):
-    proxy_value = settings.get("proxy", "")
+    proxy_value = normalize_proxy_url(settings.get("proxy", ""))
     if not settings.get("use_proxy") or not proxy_value:
         return {}
-    proxy_value = proxy_value.strip()
-    if not proxy_value:
-        return {}
-    if "://" not in proxy_value:
-        proxy_value = f"http://{proxy_value}"
     parsed = urlparse(proxy_value)
     host = parsed.hostname
     if not host:
@@ -1759,14 +1767,18 @@ class FinnhubWebSocketClient:
         self.reconnection_count = 0
         self.ws = None
         self.connected = False
+        self.connecting = False
         self.subscribed_symbols = set()
         # Queue of symbols to subscribe once connection is open
         self.queued_subscriptions = set()
         self.last_ping = time.time()
         self.reconnect_attempts = 0
-        self.max_reconnect_attempts = 5
+        self.max_reconnect_attempts = 12
+        self.reconnect_backoff_schedule = [60, 180, 300]
         self.ping_interval = 30  # Send ping every 30 seconds
         self.connection_thread = None
+        self.last_error = None
+        self.last_error_time = None
         
         # PERF: Message batching and throttling to reduce jitter
         self.price_buffer = {}  # {symbol: (price, timestamp)}
@@ -1798,9 +1810,22 @@ class FinnhubWebSocketClient:
             colored_print("[WEBSOCKET] No API key available - skipping real-time connection")
             return False
 
+        if self.connected:
+            return True
+        if self.connecting:
+            colored_print("[WEBSOCKET] Connect already in progress - skipping duplicate connect")
+            return True
+        if self.ws and self.connection_thread and self.connection_thread.is_alive():
+            colored_print("[WEBSOCKET] WebSocket thread already running - skipping duplicate connect")
+            self.connecting = True
+            return True
+        if self.ws and (not self.connection_thread or not self.connection_thread.is_alive()):
+            self.ws = None
+
         try:
             import time
             self._connection_attempt_time = time.time()
+            self.connecting = True
             colored_print("[WEBSOCKET] 🔌 Attempting to connect to Finnhub websockets...")
             def on_message(ws, message):
                 try:
@@ -1817,6 +1842,7 @@ class FinnhubWebSocketClient:
                 import time
                 self.connection_start_time = time.time()
                 self.connected = True
+                self.connecting = False
                 self.reconnect_attempts = 0
                 connection_duration = time.time() - getattr(self, '_connection_attempt_time', time.time())
                 colored_print(f"[WEBSOCKET] ✅ Connected to Finnhub real-time data (took {connection_duration:.1f}s)")
@@ -1845,6 +1871,7 @@ class FinnhubWebSocketClient:
             def on_close(ws, close_status_code, close_msg):
                 import time
                 self.connected = False
+                self.connecting = False
                 if self.connection_start_time:
                     connection_duration = time.time() - self.connection_start_time
                     self.total_connection_time += connection_duration
@@ -1856,6 +1883,9 @@ class FinnhubWebSocketClient:
             def on_error(ws, error):
                 colored_print(f"[WEBSOCKET] ❌ Connection error: {error}")
                 self.connected = False
+                self.connecting = False
+                self.last_error = str(error)
+                self.last_error_time = time.time()
 
             self.ws = websocket.WebSocketApp(
                 f"wss://ws.finnhub.io?token={self.api_key}",
@@ -1872,7 +1902,16 @@ class FinnhubWebSocketClient:
             return True
         except Exception as e:
             colored_print(f"[WEBSOCKET] Failed to initialize websocket connection: {e}")
+            self.last_error = str(e)
+            self.last_error_time = time.time()
+            self.connecting = False
             return False
+
+    def _get_reconnect_delay(self, attempt_number):
+        if attempt_number <= 0:
+            return self.reconnect_backoff_schedule[0]
+        index = min(attempt_number - 1, len(self.reconnect_backoff_schedule) - 1)
+        return self.reconnect_backoff_schedule[index]
 
     def _run_websocket(self):
         """Run the websocket connection with automatic reconnection"""
@@ -1891,7 +1930,7 @@ class FinnhubWebSocketClient:
                     self.reconnect_attempts += 1
                     self.reconnection_count += 1
                     if self.reconnect_attempts < self.max_reconnect_attempts:
-                        delay = min(2 ** self.reconnect_attempts, 30)  # Exponential backoff
+                        delay = self._get_reconnect_delay(self.reconnect_attempts)
                         colored_print(f"[WEBSOCKET] 🔄 Reconnecting in {delay}s (attempt {self.reconnect_attempts}/{self.max_reconnect_attempts})")
                         time.sleep(delay)
                     else:
@@ -1902,11 +1941,15 @@ class FinnhubWebSocketClient:
                     break
             except Exception as e:
                 colored_print(f"[WEBSOCKET] WebSocket error: {e}")
+                self.last_error = str(e)
+                self.last_error_time = time.time()
                 self.reconnect_attempts += 1
                 if self.reconnect_attempts < self.max_reconnect_attempts:
-                    time.sleep(5)
+                    delay = self._get_reconnect_delay(self.reconnect_attempts)
+                    time.sleep(delay)
                 else:
                     break
+        self.connecting = False
 
     def _handle_message(self, data):
         """Handle incoming websocket messages"""
@@ -2097,6 +2140,7 @@ class FinnhubWebSocketClient:
         # Clear buffers
         self.price_buffer.clear()
         self.last_update_time.clear()
+        self.connecting = False
         
         if self.ws:
             try:
@@ -2121,16 +2165,21 @@ class FinnhubWebSocketClient:
         current_time = time.time()
         connection_duration = current_time - getattr(self, 'connection_start_time', current_time) if self.connected else 0
         time_since_last_msg = current_time - getattr(self, 'last_message_time', current_time) if self.last_message_time else 0
+        last_error_time = getattr(self, 'last_error_time', None)
+        time_since_last_error = current_time - last_error_time if last_error_time else None
 
         return {
             'connected': self.connected,
+            'connecting': self.connecting,
             'subscribed_symbols': len(self.subscribed_symbols),
             'messages_received': self.messages_received,
             'price_updates_processed': self.price_updates_processed,
             'connection_duration': connection_duration,
             'time_since_last_message': time_since_last_msg,
             'reconnection_count': self.reconnection_count,
-            'total_connection_time': self.total_connection_time
+            'total_connection_time': self.total_connection_time,
+            'last_error': self.last_error,
+            'time_since_last_error': time_since_last_error
         }
 
     def log_status_summary(self):
@@ -2820,31 +2869,32 @@ class SettingsDialog(QtWidgets.QDialog):
         
         # === SOUND & NETWORK (Side by side) ===
         misc_layout = QtWidgets.QHBoxLayout()
-        misc_layout.setSpacing(8)
+        misc_layout.setSpacing(6)
         
         # Sound checkbox
         sound_group = QtWidgets.QGroupBox("🔊 Sound")
         sound_layout = QtWidgets.QVBoxLayout(sound_group)
-        sound_layout.setSpacing(6)
-        sound_layout.setContentsMargins(10, 12, 10, 10)
+        sound_layout.setSpacing(4)
+        sound_layout.setContentsMargins(8, 10, 8, 8)
         self.play_sound_checkbox = QtWidgets.QCheckBox("Play on Update")
         self.play_sound_checkbox.setChecked(self.settings.get("play_sound_on_update", True))
         sound_layout.addWidget(self.play_sound_checkbox)
-        sound_layout.addStretch(1)
+        # No stretch: keep the group compact vertically
         sound_group.setMaximumWidth(170)
         misc_layout.addWidget(sound_group, 0)
         
         # Network settings (compact)
         net_group = QtWidgets.QGroupBox("🌐 Network")
         net_layout = QtWidgets.QVBoxLayout(net_group)
-        net_layout.setSpacing(6)
-        net_layout.setContentsMargins(10, 12, 10, 10)
+        net_layout.setSpacing(2)
+        net_layout.setContentsMargins(8, 8, 8, 6)
         
         self.use_proxy_checkbox = QtWidgets.QCheckBox("Use Proxy")
         self.use_proxy_checkbox.setChecked(bool(self.settings.get("use_proxy", False)))
         net_layout.addWidget(self.use_proxy_checkbox)
         
-        self.proxy_edit = QtWidgets.QLineEdit(self.settings.get("proxy", ""))
+        proxy_value = normalize_proxy_url(self.settings.get("proxy", ""))
+        self.proxy_edit = QtWidgets.QLineEdit(proxy_value)
         self.proxy_edit.setPlaceholderText("http://proxy:port")
         self.proxy_edit.setEnabled(self.use_proxy_checkbox.isChecked())
         self.proxy_edit.setFixedHeight(input_height)
@@ -2857,6 +2907,8 @@ class SettingsDialog(QtWidgets.QDialog):
         net_layout.addWidget(self.use_cert_checkbox)
         
         cert_layout = QtWidgets.QHBoxLayout()
+        cert_layout.setSpacing(4)
+        cert_layout.setContentsMargins(0, 0, 0, 0)
         self.cert_file_edit = QtWidgets.QLineEdit(self.settings.get("cert_file", ""))
         self.cert_file_edit.setPlaceholderText("certificate.pem")
         self.cert_file_edit.setEnabled(self.use_cert_checkbox.isChecked())
@@ -2984,8 +3036,11 @@ class SettingsDialog(QtWidgets.QDialog):
 
         proxies = None
         if self.use_proxy_checkbox.isChecked() and self.proxy_edit.text().strip():
-            proxy = self.proxy_edit.text().strip()
-            proxies = {"http": proxy, "https": proxy}
+            proxy = normalize_proxy_url(self.proxy_edit.text())
+            if proxy:
+                if proxy != self.proxy_edit.text().strip():
+                    self.proxy_edit.setText(proxy)
+                proxies = {"http": proxy, "https": proxy}
 
         verify = True
         if self.use_cert_checkbox.isChecked() and self.cert_file_edit.text().strip():
@@ -3062,7 +3117,9 @@ class SettingsDialog(QtWidgets.QDialog):
         s["use_cert"] = self.use_cert_checkbox.isChecked()
         s["cert_file"] = self.cert_file_edit.text().strip()
         s["use_proxy"] = self.use_proxy_checkbox.isChecked()
-        s["proxy"] = self.proxy_edit.text().strip()
+        s["proxy"] = normalize_proxy_url(self.proxy_edit.text())
+        if s["proxy"] and s["proxy"] != self.proxy_edit.text().strip():
+            self.proxy_edit.setText(s["proxy"])
         s["led_bloom_effect"] = self.led_bloom_checkbox.isChecked()
         s["led_bloom_intensity"] = self.led_bloom_intensity_spin.value()
         s["led_ghosting_effect"] = self.led_ghosting_checkbox.isChecked()
@@ -3561,9 +3618,25 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
 
             status_msg = "WebSocket Connection Status\n\n"
             status_msg += f"Market Status: {'🕐 Open' if market_open else '🌙 Closed'}\n"
-            status_msg += f"Connection: {'✅ Connected' if status['connected'] else '❌ Disconnected'}\n"
+            if status['connected']:
+                connection_label = "✅ Connected"
+            elif status.get('connecting'):
+                connection_label = "⏳ Connecting"
+            else:
+                connection_label = "❌ Disconnected"
+            status_msg += f"Connection: {connection_label}\n"
             status_msg += f"Subscribed Symbols: {status['subscribed_symbols']}\n"
             status_msg += f"Finnhub Stocks: {finnhub_count} (Free tier: 50 max)\n\n"
+
+            missing_prev_close = []
+            for tkr, (price, prev_close) in self.primary_ticker.prices.items():
+                if price is not None and prev_close is None:
+                    missing_prev_close.append(tkr)
+            if missing_prev_close:
+                status_msg += "Prev Close Status:\n"
+                status_msg += f"• Missing prev_close: {len(missing_prev_close)}\n"
+                preview = ", ".join(sorted(missing_prev_close)[:8])
+                status_msg += f"• Examples: {preview}\n\n"
 
             if status['connected']:
                 status_msg += "📈 Real-Time Activity:\n"
@@ -3580,6 +3653,14 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
                 status_msg += f"• Total Updates: {status['price_updates_processed']}\n"
                 status_msg += f"• Reconnections: {status['reconnection_count']}\n"
                 status_msg += f"• Total Connected Time: {status['total_connection_time']:.1f}s\n"
+                if status.get('last_error'):
+                    error_age = status.get('time_since_last_error')
+                    if error_age is None:
+                        status_msg += f"• Last Error: {status['last_error']}\n"
+                    elif error_age < 120:
+                        status_msg += f"• Last Error: {status['last_error']} ({error_age:.1f}s ago)\n"
+                    else:
+                        status_msg += f"• Last Error: {status['last_error']} ({error_age/60:.1f}min ago)\n"
 
             if finnhub_count > 50:
                 status_msg += "\n⚠️ WARNING: Exceeding free tier limits!\n"
@@ -4428,6 +4509,24 @@ class TickerWindow(QtWidgets.QWidget):
             if self.websocket_client and self.websocket_client.price_buffer:
                 delay_ms = max(10, int(getattr(self, '_websocket_slice_delay_ms', 30)))
                 QtCore.QTimer.singleShot(delay_ms, self.refresh_websocket_visuals_deferred)
+
+            if self.websocket_client and self.websocket_client.connected:
+                missing_prev_close = []
+                for tkr, (price, prev_close) in self.prices.items():
+                    if price is not None and prev_close is None:
+                        missing_prev_close.append(tkr)
+                last_count = getattr(self, '_last_missing_prev_close_count', None)
+                now = time.time()
+                last_log = getattr(self, '_last_missing_prev_close_log_time', 0)
+                if len(missing_prev_close) != last_count or (now - last_log) > 60:
+                    self._last_missing_prev_close_count = len(missing_prev_close)
+                    self._last_missing_prev_close_log_time = now
+                    colored_print(f"[WEBSOCKET] Prev_close missing for {len(missing_prev_close)} symbols")
+                if missing_prev_close:
+                    last_refresh = getattr(self, '_last_prev_close_refresh_time', 0)
+                    if now - last_refresh > 180:
+                        self._last_prev_close_refresh_time = now
+                        self._refresh_missing_prev_close(missing_prev_close[:5])
         finally:
             self._websocket_busy = False
     
@@ -4436,6 +4535,51 @@ class TickerWindow(QtWidgets.QWidget):
         # Always check buffer and process if needed
         # Schedule rebuild with low priority (only runs when idle)
         QtCore.QTimer.singleShot(0, self.refresh_websocket_visuals)
+
+    def _refresh_missing_prev_close(self, symbols):
+        """Fetch prev_close for a small set of symbols to reduce missing change data."""
+        if not symbols:
+            return
+        if getattr(self, '_prev_close_refresh_inflight', False):
+            return
+        if not self.websocket_client or not self.websocket_client.connected:
+            return
+        self._prev_close_refresh_inflight = True
+
+        def _apply_prev_close_updates(prices):
+            try:
+                targets = self.tray_icon.ticker_windows if hasattr(self, 'tray_icon') and self.tray_icon else [self]
+                for ticker in targets:
+                    updated = []
+                    for tkr, (price, prev_close) in prices.items():
+                        if prev_close is None:
+                            continue
+                        old_price, old_prev_close = ticker.prices.get(tkr, (None, None))
+                        if price is None and old_price is not None:
+                            price = old_price
+                        if prev_close is None and old_prev_close is not None:
+                            prev_close = old_prev_close
+                        ticker.prices[tkr] = (price, prev_close)
+                        updated.append(tkr)
+                    if updated:
+                        ticker.bloom_cache_valid = False
+                        if hasattr(ticker, 'queue_incremental_pixmap_updates'):
+                            ticker.queue_incremental_pixmap_updates(updated)
+                        else:
+                            ticker.build_ticker_text(reset_scroll=False)
+            finally:
+                self._prev_close_refresh_inflight = False
+
+        def _fetch_and_apply():
+            api_key = ensure_finnhub_api_key(self)
+            if not api_key:
+                self._prev_close_refresh_inflight = False
+                return
+            api_key_2 = get_settings().get("finnhub_api_key_2", "").strip() or None
+            prices, _had_429 = fetch_all_stock_prices_with_429(symbols, api_key, api_key_2, force=True)
+            QtCore.QTimer.singleShot(0, lambda: _apply_prev_close_updates(prices))
+
+        threading.Thread(target=_fetch_and_apply, daemon=True).start()
     
     def check_websocket_cost_startup(self):
         """Check for websocket cost warnings on startup and connect if market is open"""
@@ -5687,7 +5831,15 @@ class TickerWindow(QtWidgets.QWidget):
         for ticker in self.tray_icon.ticker_windows:
             # Ensure each ticker has the normalized stocks list before rebuilding
             ticker.stocks = [s[0] for s in load_stocks()]
-            ticker.prices = prices.copy()  # All tickers get all prices
+            merged_prices = prices.copy()
+            for tkr, (price, prev_close) in merged_prices.items():
+                old_price, old_prev_close = ticker.prices.get(tkr, (None, None))
+                if price is None and old_price is not None:
+                    price = old_price
+                if prev_close is None and old_prev_close is not None:
+                    prev_close = old_prev_close
+                merged_prices[tkr] = (price, prev_close)
+            ticker.prices = merged_prices  # All tickers get all prices
             ticker.loading = False  # Hide loading screen
             ticker.bloom_cache_valid = False  # Invalidate bloom cache
             ticker.last_api_update_time = now
@@ -6112,111 +6264,6 @@ class TickerWindow(QtWidgets.QWidget):
         fetch_thread = threading.Thread(target=fetch_and_handle, daemon=True)
         fetch_thread.start()
 
-
-        # Check if we should use websockets for real-time data during market hours
-        market_is_open = self._market_is_open if hasattr(self, '_market_is_open') else False
-
-        # Log data source being used
-        if market_is_open and self.websocket_client and self.websocket_client.is_real_time_available():
-            # Using websockets
-            colored_print("[UPDATE] 🕐 Market open - using WEBSOCKETS for real-time updates")
-            pass  # Already logged in websocket status updates
-        elif market_is_open:
-            # Market open but websockets not available - falling back to polling
-            colored_print("[UPDATE] 🕐 Market open - using POLLING (websockets unavailable)")
-            colored_print(f"[WEBSOCKET] Debug: has_client={self.websocket_client is not None}, connected={self.websocket_client.connected if self.websocket_client else False}, subscribed={bool(self.websocket_client.subscribed_symbols) if self.websocket_client else False}")
-        else:
-            # Market closed - using extended polling
-            colored_print("[UPDATE] 🌙 Market closed - using EXTENDED POLLING (15min intervals)")
-
-        if self.websocket_client and market_is_open and not force:
-            # During market hours, use websockets for real-time updates
-            if not self.websocket_client.connected:
-                colored_print("[WEBSOCKET] 🕐 Market is open - connecting to real-time data")
-                if self.websocket_client.connect():
-                    # Subscribe to current stocks
-                    finnhub_symbols = [s for s in self.stocks if not s.startswith('^')]
-                    if finnhub_symbols:
-                        colored_print(f"[WEBSOCKET] Subscribing to {len(finnhub_symbols)} symbols: {finnhub_symbols[:10]}{'...' if len(finnhub_symbols) > 10 else ''}")
-                        self.websocket_client.subscribe_symbols(finnhub_symbols)
-            elif self.websocket_client.connected and not self.websocket_client.subscribed_symbols:
-                # Already connected but not subscribed - subscribe now
-                colored_print("[WEBSOCKET] 🕐 Websocket connected but not subscribed - subscribing to symbols")
-                finnhub_symbols = [s for s in self.stocks if not s.startswith('^')]
-                if finnhub_symbols:
-                    colored_print(f"[WEBSOCKET] Subscribing to {len(finnhub_symbols)} symbols: {finnhub_symbols[:10]}{'...' if len(finnhub_symbols) > 10 else ''}")
-                    self.websocket_client.subscribe_symbols(finnhub_symbols)
-
-            # If websockets are connected, skip polling during market hours
-            if self.websocket_client.is_real_time_available():
-                # Log status periodically (every 10 price updates to avoid spam)
-                if hasattr(self, '_last_websocket_status_log'):
-                    import time
-                    if time.time() - self._last_websocket_status_log > 300:  # Every 5 minutes
-                        self.websocket_client.log_status_summary()
-                        self._last_websocket_status_log = time.time()
-                else:
-                    self._last_websocket_status_log = time.time()
-
-                # Check cost warning for free tier
-                finnhub_count = len([s for s in self.stocks if not s.startswith('^')])
-                if finnhub_count > 50:
-                    colored_print(f"[WEBSOCKET] ⚠️ WARNING: You have {finnhub_count} Finnhub stocks - free tier supports 50 symbols. "
-                          "Consider upgrading to paid plan to avoid rate limiting.")
-                return
-
-        # Respect backoff unless this fetch was forced by the user
-        if not force and hasattr(TickerWindow, 'backoff_until') and now < TickerWindow.backoff_until:
-            print(f"[UPDATE] Skipping fetch - in backoff until {time_module.strftime('%H:%M:%S', time_module.localtime(TickerWindow.backoff_until))}")
-            return
-
-        # Disconnect websockets after market hours to save costs
-        if self.websocket_client and not market_is_open and self.websocket_client.connected:
-            colored_print("[WEBSOCKET] 🌙 Market closed - disconnecting to save costs")
-            self.websocket_client.log_status_summary()
-            self.websocket_client.disconnect()
-
-        api_key = ensure_finnhub_api_key(self)
-        
-        # Get all tickers
-        all_tickers = self.stocks
-        yahoo_tickers = [t for t in all_tickers if t.startswith('^')]
-        finnhub_tickers = [t for t in all_tickers if not t.startswith('^')]
-        
-        if not api_key:
-            # No API key - only fetch Yahoo Finance indices (no key needed)
-            if not yahoo_tickers:
-                # print("[BACKOFF DEBUG] No API key and no indices, aborting fetch.")  # Commented for less verbose output
-                return
-            # Only fetch Yahoo indices
-            tickers_to_fetch = yahoo_tickers
-        else:
-            # Have API key - fetch everything
-            tickers_to_fetch = all_tickers
-
-        # Get second API key if configured
-        api_key_2 = get_settings().get("finnhub_api_key_2", "").strip() or None
-
-        # Run fetch in a worker thread to avoid blocking the UI
-        def fetch_and_handle():
-            tickers = tickers_to_fetch
-            prices, had_429 = fetch_all_stock_prices_with_429(tickers, api_key or "", api_key_2, force=force)
-            QtCore.QMetaObject.invokeMethod(
-                self,
-                "_handle_prices_inplace",
-                QtCore.Qt.QueuedConnection,
-                QtCore.Q_ARG(dict, prices),
-                QtCore.Q_ARG(bool, had_429),
-                QtCore.Q_ARG(float, now)
-            )
-
-        # Use QThreadPool for non-blocking fetch
-        class FetchRunnable(QtCore.QRunnable):
-            def run(self):
-                fetch_and_handle()
-
-        QtCore.QThreadPool.globalInstance().start(FetchRunnable())
-
     @QtCore.pyqtSlot(dict, bool, float)
     def _handle_prices_inplace(self, prices, had_429, now):
         # Update last API update time for countdown overlay (moved to top of method)
@@ -6434,6 +6481,8 @@ class TickerWindow(QtWidgets.QWidget):
                     self.failed_fetch_counts[tkr] = self.failed_fetch_counts.get(tkr, 0) + 1
                     if old_price is not None:
                         price = old_price
+                    if old_prev_close is not None:
+                        prev_close = old_prev_close
                 else:
                     self.failed_fetch_counts[tkr] = 0
                     if prev_close is None and old_prev_close is not None:
@@ -7541,10 +7590,11 @@ class TickerWindow(QtWidgets.QWidget):
                 settings = get_settings()
                 proxies = None
                 verify = True
-                if settings.get("use_proxy") and settings.get("proxy"):
+                proxy_value = normalize_proxy_url(settings.get("proxy", ""))
+                if settings.get("use_proxy") and proxy_value:
                     proxies = {
-                        "http": settings["proxy"],
-                        "https": settings["proxy"]
+                        "http": proxy_value,
+                        "https": proxy_value
                     }
                 if settings.get("use_cert") and settings.get("cert_file"):
                     verify = settings["cert_file"]

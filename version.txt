@@ -31,12 +31,12 @@ StringFileInfo(
     u'040904B0',
     [StringStruct(u'CompanyName', u'Paul R. Charovkine'),
     StringStruct(u'FileDescription', u'TCKR.exe'),
-    StringStruct(u'FileVersion', u'1.0.2026.0212.1214'),
+    StringStruct(u'FileVersion', u'1.0.2026.0218.1104'),
     StringStruct(u'InternalName', u'TCKR'),
     StringStruct(u'LegalCopyright', u'Copyright (c) Paul R. Charovkine'),
     StringStruct(u'OriginalFilename', u'TCKR.exe'),
     StringStruct(u'ProductName', u'TCKR'),
-    StringStruct(u'ProductVersion', u'1.0.2026.0212.1214')])
+    StringStruct(u'ProductVersion', u'1.0.2026.0218.1104')])
   ]),
 VarFileInfo([VarStruct(u'Translation', [1033, 1200])]) 
   ]

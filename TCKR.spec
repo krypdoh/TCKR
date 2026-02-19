@@ -45,7 +45,7 @@ if os.path.exists(explicit_tbb):
 
 
 a = Analysis(
-    ['TCKR-v1.0.2026.0212.1214.py'],
+    ['TCKR-v1.0.2026.0218.1104.py'],
     pathex=pathex,
     binaries=binaries,
     datas=[('TCKR.ico', '.'), ('SubwayTicker.ttf', '.'), ('notify.wav', '.')],

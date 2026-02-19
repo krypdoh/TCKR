@@ -1,3 +1,35 @@
+TCKR Changelog - February 18, 2026
+v1.0.2026.0218.1104
+
+  Changes (2026-02-18):
+  - WebSocket dependency hardening:
+    * Detects wrong `websocket` package (missing `WebSocketApp`) and logs clear guidance.
+    * Adds `websocket-client` to requirements; surfaces install hint on failure.
+
+  - WebSocket proxy + cert support:
+    * WebSocket client now honors proxy settings used for REST calls.
+    * Supports http and socks proxies; normalizes https proxies to http for compatibility.
+    * Optional custom CA cert file is passed to websocket TLS via `sslopt`.
+
+  - Settings defaults:
+    * Adds default values for `use_proxy` and `use_cert` to avoid missing-key issues.
+
+  - Settings dialog redesign:
+    * Added vertical scrolling and fixed width to avoid overlap on smaller screens.
+    * Updated layout spacing, aligned fields, and standardized input sizes.
+    * Updated color scheme to a darker gray palette with near-black inputs.
+    * Added SHOW/HIDE API key toggles and matched browse button sizes.
+    * Added Quit TCKR button and darker button bar background.
+    * Moved Websocket Visual Refresh next to Update Interval.
+
+  - Status dialogs:
+    * Replaced WebSocket status QMessageBox with a themed dialog matching Settings/About.
+    * Added auto-refresh every 10 seconds while the status dialog is open.
+
+  - Visual effects:
+    * Reduced 5%+ price-change glow intensity for better legibility while keeping emphasis.
+
+
 TCKR Changelog - February 12, 2026
 v1.0.2026.0212.1214
 
