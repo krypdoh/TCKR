@@ -1,4 +1,4 @@
-﻿"""
+"""
 Author: Paul R. Charovkine
 Program: TCKR.py
 Date: 2026.02.18
@@ -681,13 +681,13 @@ def get_market_status_info():
         if market_open:
             return ("Market:", market_color, "Open", status_color)
         else:
-            return ("Market:", market_color, "Closed", QtGui.QColor("#FF2E2E"))
+            return ("Market:", market_color, "Closed", QtGui.QColor("#F4444E"))
     else:
         # Original implementation
         if market_open:
             return ("Market:", QtGui.QColor("#00B3FF"), "Open", QtGui.QColor("#00FF40"))
         else:
-            return ("Market:", QtGui.QColor("#00B3FF"), "Closed", QtGui.QColor("#FF2E2E"))
+            return ("Market:", QtGui.QColor("#00B3FF"), "Closed", QtGui.QColor("#F4444E"))
 
 def diagnose_appbar_state(hwnd, expected_height):
     """Diagnose the current AppBar state and work area to help troubleshoot reservation issues"""
@@ -1091,7 +1091,7 @@ class EffectsPreviewWidget(QtWidgets.QWidget):
 
         symbol_color = QtGui.QColor("#00B3FF")
         up_color = QtGui.QColor("#00FF40")
-        down_color = QtGui.QColor("#FF2E2E")
+        down_color = QtGui.QColor("#F4444E")
         value_color = up_color if is_up else down_color
 
         if self.ghost_enabled and self.ghost_intensity > 0:
@@ -5935,11 +5935,11 @@ class TickerWindow(QtWidgets.QWidget):
             r, g, b, a = opt.get_price_color_rgba(price, prev)
             base_color = QtGui.QColor(r, g, b, a)
             if price < prev:
-                base_color = QtGui.QColor(255, 46, 46, a)
+                base_color = QtGui.QColor(244, 68, 78, a)
         elif price > prev:
             base_color = QtGui.QColor("#00FF40")
         elif price < prev:
-            base_color = QtGui.QColor("#FF2E2E")
+            base_color = QtGui.QColor("#F4444E")
         else:
             base_color = QtGui.QColor("#FFFFFF")
 
@@ -6110,7 +6110,7 @@ class TickerWindow(QtWidgets.QWidget):
                 return QtGui.QColor(0, 255, 0, glow_alpha)
             else:
                 # Red glow for negative changes  
-                return QtGui.QColor(255, 0, 0, glow_alpha)
+                return QtGui.QColor(244, 68, 78, glow_alpha)
         
         # No active glow effect
         return None
@@ -6936,7 +6936,7 @@ class TickerWindow(QtWidgets.QWidget):
                 if change > 0:
                     color = QtGui.QColor("#00FF40")  # Green
                 elif change < 0:
-                    color = QtGui.QColor("#FF2E2E")  # Red
+                    color = QtGui.QColor("#F4444E")  # Red
                 else:
                     color = QtGui.QColor("#FFFFFF")  # White for zero change
 
@@ -7358,7 +7358,7 @@ class TickerWindow(QtWidgets.QWidget):
                 if change > 0:
                     color = QtGui.QColor("#00FF40")
                 elif change < 0:
-                    color = QtGui.QColor("#FF2E2E")
+                    color = QtGui.QColor("#F4444E")
                 else:
                     color = QtGui.QColor("#FFFFFF")
 
