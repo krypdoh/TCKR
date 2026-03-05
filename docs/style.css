@@ -1,57 +1,574 @@
+/* ===== Reset & Base ===== */
+@font-face {
+  font-family: 'SubwayTicker';
+  src: url('SubwayTicker.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #0b0a12;
+  --surface: #13111d;
+  --surface-light: #1c1a2e;
+  --border: rgba(255, 255, 255, 0.06);
+  --text: #e2dff5;
+  --text-muted: #9892b5;
+  --accent: #8b5cf6;
+  --accent-blue: #6366f1;
+  --accent-glow: #a78bfa;
+  --gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #a855f7);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
-    font-family: 'Segoe UI', Arial, sans-serif;
-    background: #181c24;
-    color: #e0e6ef;
-    margin: 0;
-    padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+  line-height: 1.6;
 }
-header {
-    background: #222a36;
-    padding: 2rem 1rem 1rem 1rem;
-    text-align: center;
-}
-header h1 {
-    margin: 0;
-    font-size: 2.5rem;
-    color: #00b3ff;
-}
-header p {
-    margin: 0.5rem 0 0 0;
-    font-size: 1.2rem;
-    color: #ffd700;
-}
-main {
-    max-width: 700px;
-    margin: 2rem auto;
-    background: #232b39;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px #000a;
-    padding: 2rem;
-}
-section {
-    margin-bottom: 2rem;
-}
-h2 {
-    color: #00b3ff;
-    margin-top: 0;
-}
-pre {
-    background: #181c24;
-    color: #ffd700;
-    padding: 0.5rem;
-    border-radius: 4px;
-    overflow-x: auto;
-}
-footer {
-    text-align: center;
-    color: #888;
-    padding: 1rem 0;
-    font-size: 0.9rem;
-}
+
 a {
-    color: #ffd700;
+  color: var(--accent-glow);
+  text-decoration: none;
 }
-img {
-    border-radius: 4px;
-    margin-top: 0.5rem;
+
+/* ===== Ambient Glow Background ===== */
+.glow-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.35;
+}
+
+.blob-1 {
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, #7c3aed 0%, transparent 70%);
+  top: -150px;
+  left: 50%;
+  transform: translateX(-50%);
+  animation: float1 12s ease-in-out infinite;
+}
+
+.blob-2 {
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, #4f46e5 0%, transparent 70%);
+  top: 40%;
+  left: -100px;
+  animation: float2 15s ease-in-out infinite;
+}
+
+.blob-3 {
+  width: 450px;
+  height: 450px;
+  background: radial-gradient(circle, #6d28d9 0%, transparent 70%);
+  bottom: -100px;
+  right: -80px;
+  animation: float3 18s ease-in-out infinite;
+}
+
+@keyframes float1 {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(40px); }
+}
+
+@keyframes float2 {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-50px) translateX(30px); }
+}
+
+@keyframes float3 {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(30px) translateX(-40px); }
+}
+
+/* ===== Nav ===== */
+.nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(11, 10, 18, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nav-logo {
+  font-family: 'SubwayTicker', monospace;
+  font-size: 1.5rem;
+  letter-spacing: 3px;
+  color: var(--text);
+  text-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.nav-links a {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  transition: color 0.2s;
+}
+
+.nav-links a:hover {
+  color: var(--text);
+}
+
+.btn-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text) !important;
+  font-size: 0.85rem;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.btn-nav:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  background: var(--surface-light);
+}
+
+/* ===== Hero ===== */
+.hero {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 130px 24px 40px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.hero-logo-glow {
+  font-family: 'SubwayTicker', monospace;
+  font-size: clamp(2.2rem, 5vw, 3.2rem);
+  letter-spacing: 6px;
+  color: #fbbf24;
+  text-shadow:
+    0 0 10px rgba(251, 191, 36, 0.8),
+    0 0 30px rgba(251, 191, 36, 0.5),
+    0 0 60px rgba(251, 191, 36, 0.3),
+    0 0 100px rgba(251, 191, 36, 0.15);
+  margin-bottom: 20px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 6px 16px;
+  border-radius: 100px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--accent-glow);
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  margin-bottom: 32px;
+}
+
+.hero-title {
+  font-family: 'SubwayTicker', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: clamp(2.8rem, 7vw, 5rem);
+  line-height: 1.05;
+  letter-spacing: 1px;
+  background: linear-gradient(180deg, #fff 30%, #a78bfa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 24px;
+}
+
+.hero-sub {
+  font-size: 1.15rem;
+  color: var(--text-muted);
+  max-width: 550px;
+  margin: 0 auto 36px;
+  line-height: 1.7;
+}
+
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: var(--gradient);
+  box-shadow: 0 4px 24px rgba(139, 92, 246, 0.35);
+  transition: transform 0.15s, box-shadow 0.2s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 32px rgba(139, 92, 246, 0.5);
+  color: #fff;
+}
+
+.btn-primary.large {
+  padding: 16px 40px;
+  font-size: 1.05rem;
+  border-radius: 12px;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  background: var(--surface-light);
+  color: var(--text);
+}
+
+.hero-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* ===== Showcase (Video) ===== */
+.showcase {
+  position: relative;
+  z-index: 1;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 10px 24px 20px;
+  text-align: center;
+}
+
+.showcase-window {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #0d0c16;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 20px 80px rgba(99, 102, 241, 0.15),
+    0 0 120px rgba(139, 92, 246, 0.08);
+}
+
+
+
+.showcase-video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.showcase-caption {
+  margin-top: 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+/* ===== Section Titles ===== */
+.section-title {
+  font-family: 'SubwayTicker', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  letter-spacing: 0.5px;
+  text-align: center;
+  background: linear-gradient(180deg, #fff 20%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 16px;
+}
+
+.section-sub {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  max-width: 520px;
+  margin: 0 auto 36px;
+}
+
+/* ===== Features ===== */
+.features {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 50px 24px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+}
+
+.feature-card {
+  background: rgba(19, 17, 29, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 32px 28px;
+  backdrop-filter: blur(12px);
+  transition: border-color 0.3s, transform 0.2s;
+}
+
+.feature-card:hover {
+  border-color: rgba(139, 92, 246, 0.3);
+  transform: translateY(-3px);
+}
+
+.feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(139, 92, 246, 0.1);
+  color: var(--accent-glow);
+  margin-bottom: 20px;
+}
+
+.feature-card h3 {
+  font-size: 1.1rem;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+
+.feature-card p {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+/* ===== Screenshots ===== */
+.screenshots {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px 50px;
+}
+
+.screenshot-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+.screenshot-card {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: border-color 0.3s, transform 0.2s;
+}
+
+.screenshot-card:hover {
+  border-color: rgba(139, 92, 246, 0.3);
+  transform: translateY(-2px);
+}
+
+.screenshot-card.splash {
+  max-width: 360px;
+  margin: 0 auto;
+}
+
+.screenshot-card img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.screenshot-label {
+  display: block;
+  padding: 14px 20px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+}
+
+/* ===== How It Works ===== */
+.how-it-works {
+  position: relative;
+  z-index: 1;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 24px 50px;
+}
+
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px;
+}
+
+.step {
+  text-align: center;
+  padding: 24px;
+}
+
+.step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-family: 'SubwayTicker', monospace;
+  font-size: 1.2rem;
+  color: #fff;
+  background: var(--gradient);
+  margin-bottom: 20px;
+  box-shadow: 0 0 24px rgba(139, 92, 246, 0.3);
+}
+
+.step h3 {
+  font-size: 1.05rem;
+  margin-bottom: 10px;
+}
+
+.step p {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.65;
+}
+
+/* ===== CTA ===== */
+.cta {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 40px 24px 60px;
+}
+
+/* ===== Footer ===== */
+.footer {
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid var(--border);
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.footer-inner {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.footer-logo {
+  font-family: 'SubwayTicker', monospace;
+  font-size: 1.3rem;
+  letter-spacing: 2px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 10px;
+}
+
+.footer p {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.footer-disclaimer {
+  opacity: 0.5;
+  font-size: 0.78rem !important;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .nav-links a:not(.btn-nav) {
+    display: none;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .screenshot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .steps-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .hero {
+    padding-top: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-actions {
+    flex-direction: column;
+    align-items: center;
+  }
+}
+
+/* ===== Fade-in on scroll ===== */
+.feature-card,
+.screenshot-card,
+.step {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.feature-card.visible,
+.screenshot-card.visible,
+.step.visible {
+  opacity: 1;
+  transform: translateY(0);
 }

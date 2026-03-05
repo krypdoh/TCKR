@@ -1,68 +1,188 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>TCKR - Stock & Crypto Ticker</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link href="style.css" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TCKR — Stock & Crypto Ticker for Windows</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="main.js" defer></script>
 </head>
 <body>
-    <header>
-        <h1>TCKR</h1>
-        <p>Stock & Crypto Ticker for Windows</p>
-    </header>
-    <main>
-        <section>
-            <h2>About</h2>
-            <p>
-                <strong>TCKR</strong> is a customizable, always-on-top stock and cryptocurrency ticker for Windows. It displays real-time prices, supports multiple monitors, and offers a modern, glassy UI with LED effects.
-            </p>
-        </section>
-        <section>
-            <h2>Features</h2>
-            <ul>
-                <li>Real-time stock and crypto prices (Finnhub & CoinGecko APIs)</li>
-                <li>Customizable appearance and scroll speed</li>
-                <li>Multi-monitor support</li>
-                <li>System tray integration</li>
-                <li>Easy stock/crypto management</li>
-                <li>Command-line options</li>
-            </ul>
-        </section>
-        <section>
-            <h2>Installation</h2>
-            <ol>
-                <li>Clone or download this repository.</li>
-                <li>Install Python 3.8+ and required dependencies:
-                    <pre><code>pip install -r requirements.txt</code></pre>
-                </li>
-                <li>Run <code>TCKR.py</code>:
-                    <pre><code>python TCKR/TCKR.py</code></pre>
-                </li>
-            </ol>
-            <p>
-                On first launch, you will be prompted for your <a href="https://finnhub.io/">Finnhub API key</a>.
-            </p>
-        </section>
-        <section>
-            <h2>Screenshot</h2>
-            <img src="TCKR-screenshot1.png" alt="TCKR Screenshot" style="max-width:100%;border:1px solid #ccc;" class="inline"/>
-        </section>
-        <section>
-            <h2>Configuration</h2>
-            <p>
-                Use the right-click menu or system tray icon to access settings, manage tickers, and move the ticker between screens.
-            </p>
-        </section>
-        <section>
-            <h2>License</h2>
-            <p>
-                GNU Affero General Public License v3.0. See <a href="https://github.com/yourusername/yourrepo/blob/main/LICENSE">LICENSE</a> for details.
-            </p>
-        </section>
-    </main>
-    <footer>
-        <p>Made with ❤️ for traders and developers.</p>
-    </footer>
+
+  <!-- Ambient glow blobs -->
+  <div class="glow-bg">
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+    <div class="blob blob-3"></div>
+  </div>
+
+  <!-- Nav -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">TCKR</a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#screenshots">Screenshots</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/krypdoh/TCKR" target="_blank" rel="noopener" class="btn-nav">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <header class="hero" id="hero">
+    <div class="hero-logo-glow">TCKR</div>
+    <div class="badge">v1.0 &mdash; Now Available</div>
+    <h1 class="hero-title">Your Stocks.<br/>Always Visible.</h1>
+    <p class="hero-sub">
+      A customizable, always-on-top stock and cryptocurrency ticker for Windows.<br/>
+      Real-time prices. Beautiful LED effects. Zero clutter.
+    </p>
+    <div class="hero-actions">
+      <a href="https://github.com/krypdoh/TCKR/releases" target="_blank" rel="noopener" class="btn-primary" id="download">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12 12 16 16 12"/><line x1="12" y1="8" x2="12" y2="16"/></svg>
+        Download for Windows
+      </a>
+      <a href="https://github.com/krypdoh/TCKR" target="_blank" rel="noopener" class="btn-secondary">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+    <p class="hero-meta">Windows 10+ &middot; Free &amp; Open Source &middot; AGPLv3</p>
+  </header>
+
+  <!-- Video showcase -->
+  <section class="showcase">
+    <div class="showcase-window">
+      <video autoplay muted loop playsinline class="showcase-video">
+        <source src="tckr-recording.mp4" type="video/mp4" />
+        Your browser does not support the video tag.
+      </video>
+    </div>
+    <p class="showcase-caption">Hover to see more</p>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <h2 class="section-title">Everything you need,<br/>right on your desktop.</h2>
+    <p class="section-sub">TCKR sits at the top of your screen, always visible, never in the way.</p>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <h3>Real-Time Prices</h3>
+        <p>Live stock quotes via Finnhub WebSocket streaming with REST fallback. Crypto prices powered by CoinGecko.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        </div>
+        <h3>Multi-Monitor</h3>
+        <p>Dock the ticker to any display. Choose exactly which monitor shows your prices — even run a second, independent ticker bar.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1.08-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1.08 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001.08 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1.08z"/></svg>
+        </div>
+        <h3>Fully Customizable</h3>
+        <p>Adjust scroll speed, height, transparency, indicator styles, and visual effects. Make it yours.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <h3>LED Visual Effects</h3>
+        <p>Bloom glow, motion blur, LED matrix overlay, glass cover with glare — a retro-modern look you can fine-tune.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+        </div>
+        <h3>Sparkline Charts</h3>
+        <p>Toggleable 1-day or 5-day mini trend charts next to each symbol. See the bigger picture at a glance.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1112.63 8 4 4 0 0116 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+        </div>
+        <h3>System Tray</h3>
+        <p>Runs quietly in your system tray. Right-click for quick access to settings, stock management, and more.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Screenshots -->
+  <section class="screenshots" id="screenshots">
+    <h2 class="section-title">See it in action.</h2>
+    <p class="section-sub">A sleek ticker bar that blends right into your desktop.</p>
+
+    <div class="screenshot-grid">
+      <div class="screenshot-card">
+        <img src="tckr-double-bloom.png" alt="TCKR with LED bloom effect" loading="lazy" />
+        <span class="screenshot-label">Dual ticker with LED bloom</span>
+      </div>
+      <div class="screenshot-card">
+        <img src="tckr-double-nobloom.png" alt="TCKR without bloom" loading="lazy" />
+        <span class="screenshot-label">Clean look without bloom</span>
+      </div>
+      <div class="screenshot-card splash">
+        <img src="tckr-splash.png" alt="TCKR splash screen" loading="lazy" />
+        <span class="screenshot-label">Splash screen</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="how-it-works">
+    <h2 class="section-title">Up and running in minutes.</h2>
+    <p class="section-sub">No complicated setup. Just download, add your free API key, and go.</p>
+
+    <div class="steps-grid">
+      <div class="step">
+        <div class="step-num">1</div>
+        <h3>Download</h3>
+        <p>Grab the latest release from GitHub. Single executable — no install needed.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <h3>Add Your API Key</h3>
+        <p>Get a free key from <a href="https://finnhub.io" target="_blank" rel="noopener">Finnhub.io</a> and paste it into Settings. Hit TEST to verify.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <h3>Pick Your Stocks</h3>
+        <p>Add tickers like AAPL, MSFT, BTC — or pass them as command-line arguments.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <h2 class="section-title">Ready to watch the market?</h2>
+    <p class="section-sub">Free, open-source, and built for Windows.</p>
+    <a href="https://github.com/krypdoh/TCKR/releases" class="btn-primary large" target="_blank" rel="noopener">
+      Download TCKR
+    </a>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <span class="footer-logo">TCKR</span>
+      <p>Made by Paul R. Charovkine &middot; Licensed AGPLv3</p>
+      <p class="footer-disclaimer">Prices may be delayed. For educational and entertainment purposes only.</p>
+    </div>
+  </footer>
+
 </body>
 </html>
