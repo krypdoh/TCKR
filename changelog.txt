@@ -1,33 +1,110 @@
-TCKR Changelog - February 18, 2026
-v1.0.2026.0218.1104
+TCKR Changelog - March 8, 2026
+v1.0.2026.0308.1005
 
-  Changes (2026-02-18):
-  - WebSocket dependency hardening:
-    * Detects wrong `websocket` package (missing `WebSocketApp`) and logs clear guidance.
-    * Adds `websocket-client` to requirements; surfaces install hint on failure.
+  Changes (2026-03-08):
+  - TL;DR: Numpy enhancements and timing fixes. Now syncs to display's refresh rate resulting in perfectly smooth
+    scrolling.
+  - Performance optimizations — batch 1 (low-risk, no behavioral changes):
+    * Moved `import numpy as np` to module level — eliminates repeated import lookups on every price update tick.
+    * Replaced list-build + `np.array()` pattern in `_process_price_update_deferred` with preallocated
+      `np.empty((n, 2), dtype=np.float32)` filled in-place — removes intermediate Python list allocations
+      and the extra copy performed by `np.array()`.
+    * Lowered Numba batch-processing threshold from `> 5` to `> 0` — small portfolios (including the
+      default 3-index setup) now always hit the Numba path instead of the pure-Python fallback.
+    * Lowered parallel glow-detection threshold from `> 10` to `> 0` — `parallel_glow_effect_detection`
+      (prange) is now used for all non-empty price sets when Numba is available.
+    * Changed `np.array(list)` → `np.ascontiguousarray(list, dtype=np.float32)` for parallel glow inputs,
+      guaranteeing C-contiguous memory layout for optimal Numba JIT performance.
+    * Removed 3 redundant inline `import numpy as np` statements inside hot paths.
+    * Updated fallback conditions (`<= 5` → `<= 0`, `<= 10` → `<= 0`) to match the new thresholds.
 
-  - WebSocket proxy + cert support:
-    * WebSocket client now honors proxy settings used for REST calls.
-    * Supports http and socks proxies; normalizes https proxies to http for compatibility.
-    * Optional custom CA cert file is passed to websocket TLS via `sslopt`.
+  - Anti-judder scroll fixes — batch 2:
+    * Removed `time.sleep()` from `TickerGLWidget.paintEvent` — sleeping inside Qt's paint callback
+      blocks the entire event loop, causing pending timers and signals to queue up and fire in bursts
+      when sleep returns, which is the primary source of periodic scroll judder on Windows.
+    * Replaced sleep-based frame pacing with a `QTimer(PreciseTimer)` at 15 ms driving `self.update()`.
+      The timer fires from the event loop so the loop stays free every frame. The display's VSync /
+      DWM composition naturally caps the swap rate to the monitor refresh rate.
+    * Removed redundant `import time` inside `paintEvent`; uses `self.ticker_window._time_module`
+      (already cached in `__init__`) instead.
+    * Glass glare effect (`apply_glass_glare_effect`) now caches to a `QPixmap` on first draw and blits
+      with a single `drawPixmap` call each frame. Previously ~20 painter operations (gradient allocations,
+      polygon fills, fillRect loops) ran at 60 Hz for a fully static visual layer. Cache is invalidated
+      only when window dimensions change (essentially never while docked). Visual output is pixel-identical
+      to the previous implementation (Plus composition mode is preserved on the cache painter so overlapping
+      layers stack additively, exactly matching the original direct-Plus-on-widget behaviour).
+    * Eliminated wasted Python `cycle_positions` list build in `paint_ticker` when `USE_OPT=True` —
+      the list was constructed every frame then immediately discarded in favour of the Numba array.
+      Moved it inside the `else:` fallback block where it is actually used.
 
-  - Settings defaults:
-    * Adds default values for `use_proxy` and `use_cert` to avoid missing-key issues.
+  - True VSync lock via DwmFlush — batch 3:
+    * Added `_VSyncThread` class: a `QThread` that calls `DwmFlush()` in a background thread once per
+      vertical sync interval and emits a `vsync` signal to trigger `update()` on the main thread via a
+      queued connection.
+    * Replaced the `QTimer`-based render driver (16 ms / 62.5 FPS) with `_VSyncThread`. The timer
+      approach had a residual beat frequency: at 62.5 FPS on a 60 Hz display, ~2–3 times per second a
+      timer tick would land inside an already-occupied VSync window, holding that frame for ~33 ms
+      instead of ~16 ms (single-frame hitch). `DwmFlush()` wakes at the exact hardware VSync boundary
+      so every frame maps 1:1 to a display swap — zero beat frequency, zero hitching.
+    * Frame rate is now auto-adapted to the monitor's native refresh rate: 60 Hz displays render at
+      60.0 FPS, 120 Hz at 120.0 FPS, 144 Hz at 144.0 FPS, etc. Scroll speed is unaffected because
+      movement uses time-based delta (`speed * delta_time * 60.0`) not frame-count math.
+    * `DwmFlush()` blocks inside the background thread, so the Qt event loop stays completely free
+      between frames — timers, WebSocket data, and UI events all process normally.
+    * Fallback: if DWM is unavailable (non-Windows or DWM disabled), the thread sleeps 16 ms per
+      iteration, equivalent to the previous QTimer approach.
 
-  - Settings dialog redesign:
-    * Added vertical scrolling and fixed width to avoid overlap on smaller screens.
-    * Updated layout spacing, aligned fields, and standardized input sizes.
-    * Updated color scheme to a darker gray palette with near-black inputs.
-    * Added SHOW/HIDE API key toggles and matched browse button sizes.
-    * Added Quit TCKR button and darker button bar background.
-    * Moved Websocket Visual Refresh next to Update Interval.
+  - DWM post-lock/unlock throttle recovery — batch 4:
+    * When Windows is locked, DWM enters a low-power composition mode and `DwmFlush()` returns at the
+      lock screen's reduced rate (observed ~42 FPS / 23.8 ms). After unlock, DWM can stay stuck at this
+      throttled rate indefinitely, causing TCKR to report ~42 FPS with visible judder until restart.
+    * Added self-healing logic to `_VSyncThread.run()`: tracks consecutive frames where `DwmFlush()`
+      takes >20 ms (i.e. <50 Hz). After 10 consecutive slow frames, the thread sleeps 500 ms to allow
+      DWM to reinitialise at the monitor's native rate, then resumes normal operation.
+    * A 30-second cooldown between recovery attempts prevents retrigger loops while still firing once
+      per lock/unlock cycle.
+    * Recovery is logged to console: `[PERF] DwmFlush throttled after lock/unlock — pausing 500 ms
+      for DWM to stabilise`
 
-  - Status dialogs:
-    * Replaced WebSocket status QMessageBox with a themed dialog matching Settings/About.
-    * Added auto-refresh every 10 seconds while the status dialog is open.
 
-  - Visual effects:
-    * Reduced 5%+ price-change glow intensity for better legibility while keeping emphasis.
+TCKR Changelog - February 20, 2026
+v1.0.2026.0219.2048
+
+  Changes (2026-02-20):
+  - WebSocket change/% availability fixes:
+    * Fixed symbols getting stuck in GOLD with no change/% when `prev_close` was initially missing.
+    * Added WebSocket fallback baseline: when `prev_close` is unavailable, uses last live price until backfill arrives.
+    * Added one-time per-symbol log marker for fallback mode:
+      - `[WEBSOCKET] 🟨 TEMP-BASELINE SYMBOL: using last live price until prev_close backfills`
+    * Faster missing-`prev_close` recovery while connected:
+      - Refresh interval reduced from 180s to 45s
+      - Batch size increased from 5 symbols to 20 symbols
+
+  - Manage Stocks runtime update reliability:
+    * After Save/OK, newly added symbols are fetched immediately instead of waiting for the next scheduled cycle.
+    * Newly added Finnhub symbols are subscribed to WebSocket immediately.
+    * Added diagnostics for immediate-apply path (applied count and unresolved symbol list).
+    * Removed stale symbols from per-window cached prices when symbols are removed from list.
+    * Hardened immediate fetch/apply flow to run deterministically in the Save handler.
+
+  - Manage Tickers / Crypto expansion:
+    * Added full Top 20 crypto coin checklist to Manage Tickers (Yahoo Finance symbols, `$...-USD`).
+    * Added checkbox-driven add/remove logic for all listed crypto symbols in the ticker list.
+    * Added runtime fetch/display handling so newly selected crypto symbols are fetched and rendered without restart.
+    * Added coordinated Yahoo fetch coverage for expanded crypto sets to keep price/prev_close data populated.
+
+  - Market status ticker visuals:
+    * Added optional status icon at the beginning of market item:
+      - Open: `neon_check.png`
+      - Closed: `neon_cross.png` 
+    * Added icon scaling cache and ratio-preserving resize.
+    * Fixed icon-size regression where ticker symbol icons could become too small.
+    * Market status item now always appears on first loop (always inserted first).
+
+  - Packaging (PyInstaller):
+    * Updated `TCKR.spec` and `TCKR-console.spec` to bundle market status icon assets:
+      - `neon_check.png`
+      - `neon_cross.png` 
 
 
 TCKR Changelog - February 12, 2026
@@ -268,6 +345,5 @@ v1.0.2026.0120.1512
    - Price Fetch Optimization: Prevented duplicate API calls when both tickers use same stocks
      * Secondary ticker's update timer is disabled at creation when it shares stocks with primary ticker
      * Added API response caching as additional safeguard against any remaining duplicate fetches
-
 
 
