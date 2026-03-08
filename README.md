@@ -209,7 +209,7 @@ This project is licensed under the [GNU Affero General Public License v3.0](http
 ---
 
 ## Donations
-[![Donate](https://img.shields.io/badge/Donate-PayPal-blue)](https://paypal.me/paypaulc)
+Please consider donating. Thank you! [![Donate](https://img.shields.io/badge/Donate-PayPal-blue)](https://paypal.me/paypaulc)
 
 
 
