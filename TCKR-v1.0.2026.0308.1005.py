@@ -4196,7 +4196,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         layout.addWidget(title)
         
         # Version
-        version = QtWidgets.QLabel("Version 1.0.2026.0219.2048")
+        version = QtWidgets.QLabel("Version 1.0.2026.0308.1005")
         version.setStyleSheet("font-size: 12px; color: #b0b0b0; qproperty-alignment: AlignCenter;")
         layout.addWidget(version)
         
