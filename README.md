@@ -211,7 +211,10 @@ This project is licensed under the [GNU Affero General Public License v3.0](http
 ## Donations
 
 If you find TCKR useful, consider [donating via PayPal](https://paypal.me/paypaulc).
+[![Donate](https://img.shields.io)]([https://www.paypal.com](https://paypal.me/paypaulc))
+
 
 ---
 
 *TCKR v1.0.2026.0212 — February 12, 2026*
+
