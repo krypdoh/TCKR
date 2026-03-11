@@ -1,3 +1,26 @@
+TCKR Changelog - March 9, 2026
+v1.0.2026.0309.1050
+
+  Changes (2026-03-09):
+  - Market status ticker visibility + placement control:
+    * Added new setting `show_market_status` (default: `True`).
+    * Added "Show Market Open/Closed Status" checkbox to Manage Stocks / Manage Tickers dialog.
+    * Save path now persists this setting via `save_settings(...)`.
+    * On Manage Tickers close, ticker windows now refresh cached settings so market-status visibility updates apply immediately.
+    * Market status insertion logic changed: now inserted after crypto (`$...`) symbols and before non-crypto symbols, instead of always first.
+    * If all symbols are crypto (or list is empty), market status is appended at the end to ensure deterministic placement.
+
+  - Ticker incremental update indexing fix:
+    * Corrected per-symbol pixmap replacement index calculation so runtime updates target the right entry when market status is enabled/disabled and when crypto symbols precede non-crypto symbols.
+    * Prevents symbol-to-pixmap mismatch in mixed crypto/equity layouts.
+
+  - WebSocket diagnostics and resilience instrumentation:
+    * Added connection diagnostics buffers (`connection_state_log`, `error_log`, `connection_attempts_details`) with bounded history.
+    * Improved connection logs: proxy/direct mode, thread name/state, attempt durations, lag since last message, and categorized errors (proxy/timeout/refused/SSL/network).
+    * Expanded debug status payload with thread/proxy/error/state metadata and reconnect-attempt counters.
+    * Added detailed diagnostic dump helper for end-of-retry visibility.
+
+
 TCKR Changelog - March 8, 2026
 v1.0.2026.0308.1005
 
