@@ -2,3 +2,6 @@ build/
 dist/
 toolsx/
 windows-installer/
+*.exe
+*.pyc
+__pycache__/
