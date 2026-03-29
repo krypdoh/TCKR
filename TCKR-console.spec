@@ -96,7 +96,7 @@ for dep in ('charset_normalizer',):
         hiddenimports += dep_hidden
 
 a = Analysis(
-    ['TCKR-v1.0.2026.0317.1000.py'],
+    ['TCKR-v1.1.0.py'],
     pathex=pathex,
     binaries=binaries,
     datas=datas,
@@ -130,5 +130,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=[os.path.join(project_dir, 'TCKR.ico')],
-    version=os.path.join(project_dir, 'version.txt'),
+    version=os.path.join(project_dir, 'version-TCKR.txt'),
 )
