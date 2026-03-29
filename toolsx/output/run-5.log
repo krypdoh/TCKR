@@ -1,0 +1,1 @@
+{"ts": 1769215062.427755, "kind": "appbar_event", "action": "remove", "hwnd": 1510616, "screen_index": 1, "monitor": {"hmon": 65537, "device": "\\\\.\\DISPLAY1", "rect": [0, 0, 2560, 1440], "work": [0, 0, 2560, 1359], "flags": 1}, "result": 1, "reason": null}

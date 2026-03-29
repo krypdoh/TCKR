@@ -1,0 +1,83 @@
+pyinstaller --onefile --windowed --icon "res/TCKR.ico" ^
+  --add-data "SubwayTicker.ttf;." ^
+  --add-data "res;res" ^
+  --add-data "docs;docs" ^
+  --hidden-import PyQt5.sip --name TCKR TCKR-v1.0.2026.0116.1737.py
+
+
+cd "c:\Users\prc\Dropbox\TCKR\pcticker\TCKR.Release"
+python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
+  --add-data "TCKR.ico;." `
+  --add-data "SubwayTicker.ttf;." `
+  --add-data "notify.wav;." `
+  --hidden-import=PyQt5.QtMultimedia `
+  --hidden-import=PyQt5.sip `
+  --hidden-import=requests `
+  --hidden-import=numpy `
+  --hidden-import=psutil `
+  --hidden-import=ticker_utils_numba `
+  --hidden-import=memory_pool `
+  --hidden-import=numba `
+  --hidden-import="numba.cloudpickle.cloudpickle_fast" `
+  --hidden-import="numba.cloudpickle.cloudpickle" `
+  --hidden-import="numba.np.ufunc" `
+  --hidden-import="llvmlite.binding" `
+  TCKR.py
+
+
+cd "c:\Users\prc\Dropbox\TCKR\pcticker\TCKR.Release"
+python -m  PyInstaller --noconfirm --clean --onefile --console --icon=TCKR.ico --name TCKR-console `
+  --add-data "TCKR.ico;." `
+  --add-data "SubwayTicker.ttf;." `
+  --add-data "notify.wav;." `
+  --hidden-import=PyQt5.QtMultimedia `
+  --hidden-import=PyQt5.sip `
+  --hidden-import=requests `
+  --hidden-import=numpy `
+  --hidden-import=psutil `
+  --hidden-import=ticker_utils_numba `
+  --hidden-import=memory_pool `
+  --hidden-import=numba `
+  --hidden-import="numba.cloudpickle.cloudpickle_fast" `
+  --hidden-import="numba.cloudpickle.cloudpickle" `
+  --hidden-import="numba.np.ufunc" `
+  --hidden-import="llvmlite.binding" `
+  TCKR.py
+
+---
+
+cd "c:\Users\prc\Dropbox\TCKR\pcticker\TCKR.Release"
+python -m PyInstaller --noconfirm --clean --onefile --windowed --icon=TCKR.ico --name TCKR `
+  --add-data "TCKR.ico;." `
+  --add-data "SubwayTicker.ttf;." `
+  --add-data "notify.wav;." `
+  --hidden-import=PyQt5.QtMultimedia `
+  --hidden-import=requests `
+  --hidden-import=numpy `
+  --hidden-import=numba `
+  --hidden-import="llvmlite.binding" `
+  --hidden-import=ticker_utils_numba `
+  --hidden-import=memory_pool `
+  --exclude-module=PyQt5.QtWebEngine `
+  --exclude-module=PyQt5.Qt3D `
+  TCKR.py
+
+
+cd "c:\Users\prc\Dropbox\TCKR\pcticker\TCKR.Release"
+python -m PyInstaller --noconfirm --clean --onefile --console --icon=TCKR.ico --name TCKR-console `
+  --add-data "TCKR.ico;." `
+  --add-data "SubwayTicker.ttf;." `
+  --add-data "notify.wav;." `
+  --hidden-import=PyQt5.QtMultimedia `
+  --hidden-import=requests `
+  --hidden-import=numpy `
+  --hidden-import=numba `
+  --hidden-import="llvmlite.binding" `
+  --hidden-import=ticker_utils_numba `
+  --hidden-import=memory_pool `
+  --exclude-module=PyQt5.QtWebEngine `
+  --exclude-module=PyQt5.Qt3D `
+  TCKR.py
+
+
+
