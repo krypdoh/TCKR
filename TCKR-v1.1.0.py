@@ -600,77 +600,37 @@ def is_market_open():
     """
     Check if the US stock market is currently open.
     Returns True if market is open, False if closed.
-    
+
     US Stock Market Hours (Eastern Time):
     - Monday to Friday: 9:30 AM to 4:00 PM ET
     - Closed on weekends and federal holidays
-    
-    Uses pandas_market_calendars for accurate market hours including holidays.
-    Falls back to simpler implementations if library is not available.
+
+    Uses nyse_calendar (pure-Python, no pandas dependency).
     """
     try:
-        # Method 1: Use pandas_market_calendars for most accurate market hours
-        import pandas_market_calendars as mcal
-        import pandas as pd
-        
-        # Get NYSE calendar (standard US stock market hours)
-        nyse = mcal.get_calendar('NYSE')
-        
-        # Get current time (pandas_market_calendars handles timezones internally)
-        now = pd.Timestamp.now(tz='America/New_York')
-        
-        # Get today's schedule
-        schedule = nyse.schedule(start_date=now.date(), end_date=now.date())
-        
-        # If no schedule for today, market is closed (weekend or holiday)
-        if schedule.empty:
-            return False
-        
-        # Get market open and close times for today
-        market_open_time = schedule.iloc[0]['market_open']
-        market_close_time = schedule.iloc[0]['market_close']
-        
-        # Check if current time is within market hours
-        return market_open_time <= now <= market_close_time
-    
-    except (ImportError, Exception):
-        # Method 2: Fall back to pytz-based implementation
+        from nyse_calendar import is_nyse_open
+        return is_nyse_open()
+    except Exception:
+        # Fallback: pytz-based implementation without holiday detection
         try:
             import pytz
-            
-            # Get current time in Eastern Time
             eastern = pytz.timezone('US/Eastern')
             now = datetime.datetime.now(eastern)
-            
-            # Check if it's a weekend
-            if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+            if now.weekday() >= 5:
                 return False
-            
-            # Check if it's within market hours (9:30 AM to 4:00 PM ET)
             market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
             market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
-            
             return market_open <= now <= market_close
-        
-        except (ImportError, Exception):
-            # Method 3: Fall back to simplified UTC check if pytz also not available
-            # This assumes Eastern Time is UTC-5 (standard) or UTC-4 (daylight)
+        except Exception:
+            # Last resort: UTC-5 approximation
             utc_now = datetime.datetime.now(datetime.timezone.utc)
-            
-            # Approximate Eastern Time (this is not perfect due to DST)
-            # Using UTC-5 as approximation
             eastern_approx = utc_now - datetime.timedelta(hours=5)
-            
-            # Check if it's a weekend
             if eastern_approx.weekday() >= 5:
                 return False
-            
-            # Check if it's within approximate market hours
             if 9 <= eastern_approx.hour < 16:
                 if eastern_approx.hour == 9 and eastern_approx.minute < 30:
                     return False
                 return True
-            
             return False
 
 def get_market_status_info():
@@ -5395,14 +5355,8 @@ class TickerWindow(QtWidgets.QWidget):
                 # Check if today is a market holiday
                 is_holiday = False
                 try:
-                    import pandas_market_calendars as mcal
-                    nyse = mcal.get_calendar('NYSE')
-                    # Check if market is open today (not a holiday)
-                    schedule = nyse.schedule(start_date=today_et, end_date=today_et)
-                    is_holiday = schedule.empty
-                except ImportError:
-                    # pandas-market-calendars not available, skip holiday check
-                    pass
+                    from nyse_calendar import is_nyse_holiday
+                    is_holiday = is_nyse_holiday(today_et)
                 except Exception as e:
                     colored_print(f"[MARKET] Holiday check failed: {e}")
 

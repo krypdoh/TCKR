@@ -6,3 +6,4 @@ windows-installer/
 *.pyc
 *.pyd
 __pycache__/
+.hintrc
