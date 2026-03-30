@@ -138,6 +138,48 @@ TCKR Changes - November 12, 2025
 ──────────────────────────────────────────────────────────────────────────────────────────────────
 v1.1.0  (2026-03-29, latest)
 
+  Dependency Reduction & Build Size:
+
+  - Removed pandas and pandas-market-calendars entirely:
+    * Both packages were used only for NYSE trading calendar lookups (`is_market_open`,
+      `is_nyse_holiday`). pandas 3.x ships with Apache Arrow, adding ~25-35 MB to the
+      bundled executable for functionality that needed only a few date calculations.
+    * Replaced with a new pure-Python module `nyse_calendar.py` (zero external dependencies).
+      Implements the full NYSE holiday schedule: New Year's Day, MLK Jr. Day, Presidents'
+      Day, Good Friday (Easter-based), Memorial Day, Juneteenth (2022+), Independence Day,
+      Labor Day, Thanksgiving, Christmas — all with correct observed-weekday shifting.
+    * Uses `zoneinfo.ZoneInfo("America/New_York")` (Python 3.9+) with pytz fallback.
+    * Public API: `is_nyse_open() -> bool`, `is_nyse_holiday(date=None) -> bool`,
+      `nyse_holidays(year) -> frozenset[date]`.
+
+  - Updated `TCKR-v1.1.0.py`:
+    * `is_market_open()`: rewritten to call `nyse_calendar.is_nyse_open()` directly;
+      no longer imports pandas or pandas_market_calendars anywhere in the file.
+    * TickerWindow holiday check (~line 5398): replaced `mcal.get_calendar('NYSE')` block
+      with `nyse_calendar.is_nyse_holiday(today_et)`.
+
+  - Expanded PyInstaller excludes in `TCKR-console.spec` and `TCKR-noconsole.spec`:
+    * Explicitly exclude: `pandas`, `pandas_market_calendars`, `scipy`, `matplotlib`,
+      `PIL`, `Pillow`, `IPython`, `tornado`, `jupyter`, `notebook`, `pytest`,
+      `setuptools`, `pkg_resources`, `numba.tests`, `numba.cuda`, `numba.pycc`,
+      `tkinter`, `unittest`, `email`, `xmlrpc`, `http.server`, `pydoc`, `doctest`,
+      `difflib`.
+    * Removed `distutils` from excludes — PyInstaller's own `hook-distutils.py` aliases
+      it internally; excluding it caused a build-time `ValueError`.
+
+  - Added `nyse_calendar.py`, `modern_gui_styles.py`, `memory_pool.py` to `datas` in
+    both spec files so PyInstaller bundles these local modules correctly.
+
+  - Updated `requirements.txt`:
+    * Removed `pandas>=2.0.0` and `pandas-market-calendars>=4.0.0`.
+    * Pinned `numpy>=2.0.0` (numpy 1.x incompatible with Python 3.14 — requires meson
+      0.63.3+ which is not available; numpy 2.x builds cleanly).
+    * `numba>=0.57.0` retained without upper pin.
+
+  Expected build size reduction: ~25-40 MB vs prior build (pandas/Arrow removal).
+
+
+
   Bug fixes:
 
   - Fixed N/A prices persisting on the second ticker when a custom stock file is configured:

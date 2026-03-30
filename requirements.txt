@@ -1,9 +1,8 @@
 # Runtime dependencies
 PyQt5>=5.15.0
 requests>=2.31.0
-numpy>=1.24.0
-pandas>=2.0.0
-pandas-market-calendars>=4.0.0
+# numpy: Python 3.14 requires numpy 2.x (1.x does not support Python 3.14)
+numpy>=2.0.0
 psutil>=5.9.0
 websocket-client>=1.6.0
 pip-system-certs>=4.0
@@ -17,6 +16,7 @@ charset_normalizer>=3.0.0
 setuptools>=65.0.0
 
 # Optional performance dependency (fallback if Cython extension not built)
+# NOTE: Check numba compatibility with your Python version before installing
 numba>=0.57.0
 
 # Build-time dependency for Cython extension (run: python setup_cython.py build_ext --inplace)
@@ -24,3 +24,6 @@ cython>=3.0.0  # Only needed for building Cython extension
 
 # Optional packaging tool
 pyinstaller>=6.0.0
+
+# NOTE: pandas and pandas-market-calendars have been removed.
+# NYSE holiday/market-hours logic is now handled by nyse_calendar.py (pure Python, no extra deps).

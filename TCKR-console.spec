@@ -69,6 +69,7 @@ hiddenimports = [
     'ticker_utils_cython',
     'ticker_utils_numba',
     'memory_pool',
+    'nyse_calendar',
     'numba',
     'numba.cloudpickle.cloudpickle_fast',
     'numba.cloudpickle.cloudpickle',
@@ -84,6 +85,9 @@ datas = [
     ('notify.wav', '.'),
     ('neon_check.png', '.'),
     ('neon_cross.png', '.'),
+    ('nyse_calendar.py', '.'),
+    ('modern_gui_styles.py', '.'),
+    ('memory_pool.py', '.'),
 ]
 
 # Collect full charset_normalizer bundle so Requests can resolve charset backend.
@@ -104,7 +108,37 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=['pyi_rth_requests_charset.py'],
-    excludes=['scipy.special._cdflib', 'numba.np.ufunc.tbbpool'],
+    excludes=[
+        # Heavy scientific/data packages not used by TCKR
+        'pandas',
+        'pandas_market_calendars',
+        'scipy',
+        'scipy.special._cdflib',
+        'matplotlib',
+        'matplotlib.backends',
+        'PIL',
+        'Pillow',
+        'IPython',
+        'tornado',
+        'jupyter',
+        'notebook',
+        'pytest',
+        'setuptools',
+        'pkg_resources',
+        # Unused numba internals
+        'numba.np.ufunc.tbbpool',
+        'numba.tests',
+        'numba.cuda',
+        'numba.pycc',
+        # Unused stdlib heavyweights
+        'tkinter',
+        'unittest',
+        'xmlrpc',
+        'http.server',
+        'pydoc',
+        'doctest',
+        'difflib',
+    ],
     noarchive=False,
     optimize=0,
 )
