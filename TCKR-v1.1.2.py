@@ -1,8 +1,8 @@
 """
 Author: Paul R. Charovkine
 Program: TCKR.py
-Date: 2026.03.30
-Version: 1.1.1
+Date: 2026.04.03
+Version: 1.1.2
 License: GNU AGPLv3
 
 Description:
@@ -4406,7 +4406,7 @@ class TrayIcon(QtWidgets.QSystemTrayIcon):
         layout.addWidget(title)
         
         # Version
-        version = QtWidgets.QLabel("Version 1.1.1")
+        version = QtWidgets.QLabel("Version 1.1.2")
         version.setStyleSheet("font-size: 12px; color: #b0b0b0; qproperty-alignment: AlignCenter;")
         layout.addWidget(version)
         
@@ -5933,14 +5933,32 @@ class TickerWindow(QtWidgets.QWidget):
             except Exception:
                 device_scale = 1.0
 
-        # SPI_GETWORKAREA returns physical pixels.
-        # rect (Qt geometry) is in logical pixels.
-        # Convert rect.top to physical for comparison.
+        # Get the work area for the specific monitor this window is on.
+        # SPI_GETWORKAREA only returns the primary monitor's work area, so we use
+        # MonitorFromPoint + GetMonitorInfo to get the correct monitor's work area.
         user32 = ctypes.windll.user32
-        work_area = wintypes.RECT()
-        user32.SystemParametersInfoW(48, 0, ctypes.byref(work_area), 0)  # SPI_GETWORKAREA
         phys_screen_top = int(round(rect.top() * device_scale))
-        existing_reservation_phys = work_area.top - phys_screen_top  # both physical
+        phys_screen_left = int(round(rect.left() * device_scale))
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [
+                ('cbSize',    wintypes.DWORD),
+                ('rcMonitor', wintypes.RECT),
+                ('rcWork',    wintypes.RECT),
+                ('dwFlags',   wintypes.DWORD),
+            ]
+
+        MONITOR_DEFAULTTONEAREST = 0x00000002
+        pt = wintypes.POINT()
+        pt.x = phys_screen_left + 1
+        pt.y = phys_screen_top + 1
+        hmon = user32.MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST)
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        user32.GetMonitorInfoW(hmon, ctypes.byref(mi))
+        work_area = mi.rcWork
+
+        existing_reservation_phys = work_area.top - mi.rcMonitor.top  # reservation relative to this monitor's top
         # Express foreign reservation in logical pixels for Qt use
         existing_reservation_logical = int(existing_reservation_phys / device_scale)
         

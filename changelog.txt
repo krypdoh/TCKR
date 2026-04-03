@@ -1,5 +1,22 @@
 TCKR Changelog
 ──────────────────────────────────────────────────────────────────────────────────────────────────
+v1.1.2  (2026-04-03)
+
+  Bug fixes:
+
+  - Fixed incorrect reserved-space detection when launching on a non-primary monitor:
+    * When another application had reserved desktop space (e.g. a docked toolbar) on display 1,
+      and TCKR launched on display 2, TCKR incorrectly honoured the foreign reservation and left
+      a blank gap at the top of display 2.
+    * Root cause: the work-area query used `SystemParametersInfoW(SPI_GETWORKAREA)`, which on
+      Windows always returns the work area for the primary monitor only — not the monitor the
+      window is actually on.
+    * Fix: replaced the `SPI_GETWORKAREA` call with `MonitorFromPoint` + `GetMonitorInfoW`, which
+      returns work area and monitor bounds scoped to the specific monitor the target point falls on.
+      `existing_reservation_phys` is now derived from `rcWork.top - rcMonitor.top` of the correct
+      monitor, so reserved-space from other displays is never mistakenly applied.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
 TCKR Performance Optimization Session - January 17, 2026
 
   Major Performance Improvements:
