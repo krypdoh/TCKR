@@ -100,7 +100,7 @@ for dep in ('charset_normalizer',):
         hiddenimports += dep_hidden
 
 a = Analysis(
-    ['TCKR-v1.1.2.py'],
+    ['TCKR-v1.1.4.py'],
     pathex=pathex,
     binaries=binaries,
     datas=datas,

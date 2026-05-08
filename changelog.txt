@@ -1,5 +1,45 @@
 TCKR Changelog
 ──────────────────────────────────────────────────────────────────────────────────────────────────
+v1.1.4  (2026-05-08)
+
+  Performance improvements:
+
+  - Fixed scroll judder and 30 FPS cap on dual-ticker setups:
+    * Root cause 1 (primary): each TickerGLWidget created its own _VSyncThread calling
+      DwmFlush(). With two tickers, both threads unblocked at the same VBlank and queued
+      two paint passes per 16.67 ms window, effectively halving FPS to ~30.
+      Fix: all TickerGLWidget instances now share a single _VSyncThread stored on
+      QApplication. One DwmFlush() drives both update() calls, both paints complete within
+      the same frame budget → true 60 FPS on dual tickers. Destroying one ticker widget
+      disconnects only its own update() slot; the shared thread keeps running for the other.
+    * Root cause 2 (secondary): _rebuild_pixmaps_deferred() called build_ticker_pixmaps()
+      synchronously on the main thread after every API fetch cycle, causing 26–54 ms stalls
+      and a burst of [PAINT DELAY] warnings directly after "Completed fetching N prices".
+      Fix: _rebuild_pixmaps_deferred() now sets a coalescing flag and posts
+      QTimer.singleShot(0, ...) — control returns immediately so paintEvent is never blocked.
+      The actual rebuild runs after all pending paint events complete. Multiple rapid calls
+      (e.g. a full batch of 42 symbols) coalesce into a single rebuild.
+    * Root cause 3 (tertiary): delta_time was capped at 50 ms, so after any stall the
+      scroll offset jumped 3× its normal per-frame distance, causing a visible lurch.
+      Fix: cap tightened to 17 ms (one frame). A stall now causes a brief momentary
+      slowdown in scroll speed rather than a positional lurch.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
+v1.1.3  (2026-05-08)
+
+  Bug fixes:
+
+  - Fixed crash/error at market close when WebSocket disconnect races with reconnect loop:
+    * At market close, `disconnect()` set `self.ws = None` while the `_run_websocket` thread was
+      still alive in its reconnection loop. On the next iteration the thread called
+      `self.ws.run_forever()` on `None`, raising `AttributeError: 'NoneType' object has no
+      attribute 'run_forever'`. On some systems this unhandled thread exception crashed the app.
+    * Fix: added a `_stop_requested` flag. `disconnect()` sets the flag before clearing `self.ws`;
+      the reconnect loop checks both `self.ws is None` and `_stop_requested` before calling
+      `run_forever`, and exits cleanly if either is true. The flag is reset to `False` at the
+      start of each `connect()` call so normal reconnection is unaffected.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
 v1.1.2  (2026-04-03)
 
   Bug fixes:
