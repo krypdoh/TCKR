@@ -3604,8 +3604,29 @@ class _VSyncThread(QtCore.QThread):
 
     def run(self):
         import time as _time
+        import ctypes as _ct
         _consecutive_slow = 0   # Frames where DwmFlush took >20ms consecutively
         _last_reset_time = 0.0  # Timestamp of last DWM stabilisation pause
+
+        # Raise this thread to time-critical OS priority so Windows cannot preempt
+        # the DwmFlush() call at an inopportune moment (which would delay the VBlank
+        # wakeup and add jitter to every scroll step).  Also set 1 ms timer resolution
+        # so DwmFlush wakeups and sleep()-based fallbacks are as precise as possible.
+        # Default Windows timer resolution is 15.625 ms — far too coarse for VSync.
+        _timer_period_set = False
+        if sys.platform == 'win32':
+            try:
+                _ct.windll.kernel32.SetThreadPriority(
+                    _ct.windll.kernel32.GetCurrentThread(),
+                    15  # THREAD_PRIORITY_TIME_CRITICAL
+                )
+            except Exception:
+                pass
+            try:
+                _ct.windll.winmm.timeBeginPeriod(1)
+                _timer_period_set = True
+            except Exception:
+                pass
 
         while self._running:
             if self._dwm_available:
@@ -3615,6 +3636,15 @@ class _VSyncThread(QtCore.QThread):
                     self._dwmapi.DwmFlush()
                     vsync_time = _time.perf_counter()  # exact VBlank wakeup moment
                     elapsed = vsync_time - t0
+
+                    # Skip spurious immediate returns: DwmFlush occasionally releases
+                    # in <2 ms without blocking for a real VBlank (nothing to present
+                    # in the DWM queue).  Emitting at near-zero intervals creates
+                    # freeze+jump pairs that appear as scroll judder.  The fastest
+                    # consumer display (480 Hz) has a 2.08 ms frame interval, so any
+                    # return in <2 ms is unambiguously spurious.
+                    if elapsed < 0.002:
+                        continue
 
                     # Self-healing: detect post-lock DWM throttling.
                     # When Windows is locked, DWM drops to a low-power rate.
@@ -3644,6 +3674,14 @@ class _VSyncThread(QtCore.QThread):
                 vsync_time = _time.perf_counter()
             if self._running:
                 self.vsync.emit(vsync_time)
+
+        # Release the 1 ms timer resolution when the VSync loop exits so we don't
+        # hold a system-wide high-resolution timer that wastes power unnecessarily.
+        if _timer_period_set:
+            try:
+                _ct.windll.winmm.timeEndPeriod(1)
+            except Exception:
+                pass
 
 
 class TickerGLWidget(QtWidgets.QWidget):  # Changed from QOpenGLWidget to QWidget
@@ -4860,6 +4898,16 @@ class TickerWindow(QtWidgets.QWidget):
         # Frame timing for smooth animation (import time module to avoid shadowing later)
         import time as time_module
         self.last_frame_time = time_module.perf_counter()
+        # Exponentially-smoothed VBlank interval used for jitter-resistant scroll
+        # advance (α=0.05 in paint_ticker).  Initialise at 60 Hz; converges to the
+        # true display rate within ~1 second of the first VSync signals.
+        self._smooth_delta = 1.0 / 60.0
+        # Locked nominal VSync interval used for the actual scroll calculation.
+        # Only updates when a raw frame lands within 1.5 ms of the current
+        # nominal expectation (clean-frame gate).  Frames that arrive during bad
+        # DWM periods (mean ~10 ms ± 4 ms at 120 Hz) fail the gate so scroll
+        # speed stays constant.  0.0 = not yet bootstrapped.
+        self._nominal_delta = 0.0
         # target_frame_interval will be set after refresh rate detection
         self.ticker_pixmaps = []
         self.ticker_pixmap_widths = []
@@ -8965,7 +9013,33 @@ class TickerWindow(QtWidgets.QWidget):
         if self.ticker_pixmaps and not getattr(self, 'loading', False) and not self.is_paused:
             _base_w = self.get_cycle_width()
             _scw = (self._donate_pixmap_width + _base_w) + 2 * _base_w  # supercycle_width
-            actual_scroll = self.scroll_speed * delta_time * 60.0
+            if _vsync_time is not None:
+                # Stage 1 — fast EMA with hard outlier rejection (α=0.05).
+                # 2-VBlank frames (delta > 1.5 × EMA) are clamped to the EMA so
+                # the error term stays zero.  Raw delta_time still flows to
+                # _jitter_samples so the [JUDDER] log shows true display jitter.
+                _ALPHA = 0.05
+                _feed = (self._smooth_delta
+                         if delta_time > self._smooth_delta * 1.5
+                         else delta_time)
+                self._smooth_delta += _ALPHA * (_feed - self._smooth_delta)
+
+                # Stage 2 — locked nominal rate used for the actual scroll advance.
+                # _nominal_delta only moves when the raw frame lands within 1.5 ms
+                # of the current nominal expectation (clean-frame gate, α=0.02).
+                # During bad DWM periods — frames at mean 10-12 ms ± 4 ms instead
+                # of the expected 8.33 ms — nearly every frame fails the gate, so
+                # _nominal_delta stays frozen and scroll speed holds constant.
+                # When DWM recovers, clean frames pass the gate and nominal slowly
+                # tracks back via α=0.02 (~50 frames to re-lock).
+                if self._nominal_delta <= 0.0:
+                    self._nominal_delta = delta_time          # first-frame bootstrap
+                elif abs(delta_time - self._nominal_delta) < 0.0015:  # 1.5 ms gate
+                    self._nominal_delta += 0.02 * (delta_time - self._nominal_delta)
+
+                actual_scroll = self.scroll_speed * self._nominal_delta * 60.0
+            else:
+                actual_scroll = 0.0
             self._last_actual_scroll = actual_scroll
             if not self.paused:
                 self.offset -= actual_scroll
