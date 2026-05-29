@@ -1,5 +1,39 @@
 TCKR Changelog
 ──────────────────────────────────────────────────────────────────────────────────────────────────
+v1.1.5  (2026-05-29)
+
+  Performance improvements:
+
+  - Fixed dual-ticker scroll judder caused by VSync timestamp overwrite race:
+    * Root cause: the shared _VSyncThread (introduced in v1.1.4) emits one vsync signal per
+      VBlank. In a dual-ticker setup, widget1's paintEvent runs first and consumes the VBlank
+      timestamp. By the time widget2's paintEvent runs, the vsync thread may have already
+      emitted the *next* VBlank's timestamp. Widget2 would read T_N+1 instead of T_N, compute
+      a delta of ~2 frames (~33 ms), and scroll double the expected distance — a visible lurch
+      every few seconds.
+    * Fix: replaced the scalar vsync_time attribute with a per-widget FIFO queue
+      (_vsync_queue, a collections.deque). Each widget's _on_vsync slot appends the arriving
+      timestamp to its own queue and calls update(). paint_ticker pops the OLDEST entry
+      (popleft) so each widget always advances from the VBlank that triggered its specific
+      repaint — never from a newer one that arrived while it was waiting behind the other
+      widget in the Qt event queue.
+
+  - Fixed non-vsync repaints (price updates, pixmap rebuilds, resize) corrupting scroll timing:
+    * Previously, any update() triggered by a price fetch or pixmap rebuild would pass through
+      paint_ticker with the current wall-clock time, advancing last_frame_time and producing a
+      spurious delta. The next vsync-triggered frame would then calculate a near-zero delta
+      (wall-clock minus wall-clock from mid-frame) and stall scroll for one frame.
+    * Fix: paint_ticker now distinguishes vsync-triggered frames (queue non-empty) from
+      non-vsync repaints (queue empty). Non-vsync repaints set delta_time = 0.0 and do NOT
+      advance last_frame_time — the ticker redraws at its current position without stepping
+      scroll. Only true VBlank-timestamped frames advance the scroll position.
+
+  - Frame timing moved to before QPainter construction in paint_ticker:
+    * Previously timing was computed after QPainter setup, adding ~0.1–0.3 ms of overhead to
+      the measured delta on every frame. Timing is now captured at the very start of
+      paint_ticker so the delta reflects the true VBlank-to-VBlank interval.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────
 v1.1.4  (2026-05-08)
 
   Performance improvements:
